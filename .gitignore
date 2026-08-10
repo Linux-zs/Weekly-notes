@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+apps/web/vite.config.js
+apps/web/vite.config.d.ts
+.env
+data/*.sqlite*
+data/backups/
+data/uploads/
+playwright-report/
+test-results/
+.playwright-cli/
+.learnings/

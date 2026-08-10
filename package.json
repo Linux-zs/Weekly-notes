@@ -1,0 +1,16 @@
+{
+  "name": "zhoubao",
+  "private": true,
+  "packageManager": "pnpm@11.16.0",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @zhoubao/server --filter @zhoubao/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "start": "pnpm --filter @zhoubao/server start",
+    "db:migrate": "pnpm --filter @zhoubao/server db:migrate",
+    "db:backup": "pnpm --filter @zhoubao/server db:backup",
+    "holiday:import": "pnpm --filter @zhoubao/server holiday:import"
+  }
+}
