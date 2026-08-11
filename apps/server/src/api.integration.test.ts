@@ -35,7 +35,22 @@ afterAll(async () => {
 const headers = () => ({ cookie, origin: 'http://127.0.0.1:3000' });
 
 describe('authenticated weekly report workflow', () => {
-  it('creates, searches, and converts memo content transactionally', async () => {
+  it('does not retain the removed work material storage or API', async () => {
+    const retiredTables = sqlite
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memo_cards','memo_card_tags')"
+      )
+      .all();
+    expect(retiredTables).toEqual([]);
+    const retiredEndpoint = await app.inject({
+      method: 'GET',
+      url: '/api/memos',
+      headers: headers()
+    });
+    expect(retiredEndpoint.statusCode).toBe(404);
+  });
+
+  it('creates, updates, and searches report content transactionally', async () => {
     const project = await app.inject({
       method: 'POST',
       url: '/api/projects',
@@ -140,34 +155,6 @@ describe('authenticated weekly report workflow', () => {
     const search = await app.inject({ method: 'GET', url: '/api/search?q=API', headers: headers() });
     expect(search.statusCode).toBe(200);
     expect(search.json().items).toHaveLength(1);
-    const memo = await app.inject({
-      method: 'POST',
-      url: '/api/memos',
-      headers: headers(),
-      payload: {
-        title: '待转换卡片',
-        contentMd: '转换内容',
-        projectId,
-        tagIds: [tagId],
-        color: '#F2C66D',
-        pinned: false
-      }
-    });
-    expect(memo.statusCode).toBe(201);
-    const converted = await app.inject({
-      method: 'POST',
-      url: `/api/memos/${memo.json().id}/convert`,
-      headers: headers(),
-      payload: { weekYear: 2026, weekNumber: 33, type: 'next_plan', projectId }
-    });
-    expect(converted.statusCode).toBe(201);
-    const duplicate = await app.inject({
-      method: 'POST',
-      url: `/api/memos/${memo.json().id}/convert`,
-      headers: headers(),
-      payload: { weekYear: 2026, weekNumber: 33, type: 'next_plan', projectId }
-    });
-    expect(duplicate.statusCode).toBe(409);
     const renamedTag = await app.inject({
       method: 'PATCH',
       url: `/api/tags/${tagId}`,
@@ -176,6 +163,35 @@ describe('authenticated weekly report workflow', () => {
     });
     expect(renamedTag.statusCode).toBe(200);
     expect(renamedTag.json()).toMatchObject({ name: '已验证', color: '#2F5597' });
+  });
+
+  it('uploads and serves a custom profile avatar', async () => {
+    const boundary = 'zhoubao-avatar-boundary';
+    const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    const multipart = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="avatar"; filename="avatar.png"\r\nContent-Type: image/png\r\n\r\n`
+      ),
+      image,
+      Buffer.from(`\r\n--${boundary}--\r\n`)
+    ]);
+    const uploaded = await app.inject({
+      method: 'POST',
+      url: '/api/settings/avatar',
+      headers: { ...headers(), 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: multipart
+    });
+    expect(uploaded.statusCode).toBe(201);
+    expect(uploaded.json().avatarUrl).toMatch(/^\/api\/profile-avatars\/[0-9a-f-]+\.png$/);
+    const avatar = await app.inject({
+      method: 'GET',
+      url: uploaded.json().avatarUrl,
+      headers: { cookie }
+    });
+    expect(avatar.statusCode).toBe(200);
+    expect(avatar.headers['content-type']).toContain('image/png');
+    const me = await app.inject({ method: 'GET', url: '/api/me', headers: headers() });
+    expect(me.json().user.avatarUrl).toBe(uploaded.json().avatarUrl);
   });
 
   it('manages invitations and switches the active workspace', async () => {

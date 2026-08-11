@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { memoInputSchema, reportItemInputSchema, reportItemTypes } from '@zhoubao/shared';
+import { reportItemInputSchema, reportItemTypes } from '@zhoubao/shared';
 import type { ReportItemProgress, ReportItemType } from '@zhoubao/shared';
 import { z } from 'zod';
 import { id, now, sqlite } from '../db/index.js';
 import { requireUser } from '../types.js';
 import type { CurrentUser } from '../types.js';
 import { isoWeekRange } from '../lib/week.js';
+import { detectImage } from '../lib/image.js';
 import { config } from '../config.js';
 
 const uuidParam = z.object({ id: z.string().uuid() });
@@ -51,59 +52,18 @@ interface SearchResultRow {
   projectColor: string | null;
 }
 
-interface MemoRow {
-  id: string;
-  title: string;
-  contentMd?: string;
-  content_md?: string;
-  projectId?: string | null;
-  project_id?: string | null;
-  color: string;
-  pinned: number;
-  archivedAt?: string | null;
-  archived_at?: string | null;
-  convertedReportItemId?: string | null;
-  converted_report_item_id?: string | null;
-  version: number;
-}
-
-function detectImage(buffer: Buffer) {
-  if (
-    buffer.length >= 8 &&
-    buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  )
-    return { mimeType: 'image/png', extension: 'png' };
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)
-    return { mimeType: 'image/jpeg', extension: 'jpg' };
-  if (buffer.length >= 6 && ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii')))
-    return { mimeType: 'image/gif', extension: 'gif' };
-  if (
-    buffer.length >= 12 &&
-    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
-    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
-  )
-    return { mimeType: 'image/webp', extension: 'webp' };
-  return null;
-}
-
-function replaceTags(
-  table: 'report_item_tags' | 'memo_card_tags',
-  column: 'report_item_id' | 'memo_card_id',
-  entityId: string,
-  tagIds: string[],
-  workspaceId: string
-) {
-  sqlite.prepare(`DELETE FROM ${table} WHERE ${column}=?`).run(entityId);
+function replaceTags(entityId: string, tagIds: string[], workspaceId: string) {
+  sqlite.prepare('DELETE FROM report_item_tags WHERE report_item_id=?').run(entityId);
   const insert = sqlite.prepare(
-    `INSERT INTO ${table}(${column},tag_id) SELECT ?,id FROM tags WHERE id=? AND workspace_id=?`
+    'INSERT INTO report_item_tags(report_item_id,tag_id) SELECT ?,id FROM tags WHERE id=? AND workspace_id=?'
   );
   tagIds.forEach((tagId) => insert.run(entityId, tagId, workspaceId));
 }
 
-function loadTagsFor(itemId: string, table = 'report_item_tags', column = 'report_item_id') {
+function loadTagsFor(itemId: string) {
   return sqlite
     .prepare(
-      `SELECT t.id,t.name,t.color FROM tags t JOIN ${table} x ON x.tag_id=t.id WHERE x.${column}=? ORDER BY t.name COLLATE NOCASE`
+      'SELECT t.id,t.name,t.color FROM tags t JOIN report_item_tags x ON x.tag_id=t.id WHERE x.report_item_id=? ORDER BY t.name COLLATE NOCASE'
     )
     .all(itemId);
 }
@@ -257,7 +217,7 @@ export async function registerApi(app: FastifyInstance) {
           timestamp,
           timestamp
         );
-      replaceTags('report_item_tags', 'report_item_id', itemId, input.tagIds, user.workspaceId);
+      replaceTags(itemId, input.tagIds, user.workspaceId);
       sqlite
         .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
         .run(timestamp, reportId);
@@ -307,8 +267,7 @@ export async function registerApi(app: FastifyInstance) {
           body.expectedVersion
         );
       if (!result.changes) throw new Error('VERSION_CONFLICT');
-      if (body.tagIds)
-        replaceTags('report_item_tags', 'report_item_id', itemId, body.tagIds, user.workspaceId);
+      if (body.tagIds) replaceTags(itemId, body.tagIds, user.workspaceId);
       sqlite
         .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
         .run(timestamp, current.report_id);
@@ -513,164 +472,6 @@ export async function registerApi(app: FastifyInstance) {
       page: q.page,
       hasMore: rows.length > 20
     };
-  });
-
-  app.get('/api/memos', { preHandler: requireUser }, async (request) => {
-    const query = z.object({ archived: z.enum(['true', 'false']).default('false') }).parse(request.query);
-    const rows = sqlite
-      .prepare(
-        `SELECT id,title,content_md AS contentMd,project_id AS projectId,color,pinned,archived_at AS archivedAt,converted_report_item_id AS convertedReportItemId,version,created_at AS createdAt,updated_at AS updatedAt FROM memo_cards WHERE workspace_id=? AND author_id=? AND archived_at IS ${query.archived === 'true' ? 'NOT NULL' : 'NULL'} ORDER BY pinned DESC,updated_at DESC`
-      )
-      .all(request.currentUser!.workspaceId, request.currentUser!.id) as MemoRow[];
-    return {
-      memos: rows.map((row) => ({
-        ...row,
-        pinned: Boolean(row.pinned),
-        tags: loadTagsFor(row.id, 'memo_card_tags', 'memo_card_id')
-      }))
-    };
-  });
-  app.post('/api/memos', { preHandler: requireUser }, async (request, reply) => {
-    const input = memoInputSchema.parse(request.body);
-    const memoId = id();
-    const timestamp = now();
-    sqlite.transaction(() => {
-      sqlite
-        .prepare(
-          'INSERT INTO memo_cards(id,workspace_id,author_id,project_id,title,content_md,color,pinned,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)'
-        )
-        .run(
-          memoId,
-          request.currentUser!.workspaceId,
-          request.currentUser!.id,
-          input.projectId ?? null,
-          input.title,
-          input.contentMd,
-          input.color,
-          input.pinned ? 1 : 0,
-          1,
-          timestamp,
-          timestamp
-        );
-      replaceTags('memo_card_tags', 'memo_card_id', memoId, input.tagIds, request.currentUser!.workspaceId);
-    })();
-    return reply.code(201).send({
-      id: memoId,
-      ...input,
-      convertedReportItemId: null,
-      version: 1,
-      tags: loadTagsFor(memoId, 'memo_card_tags', 'memo_card_id')
-    });
-  });
-  app.patch('/api/memos/:id', { preHandler: requireUser }, async (request, reply) => {
-    const { id: memoId } = uuidParam.parse(request.params);
-    const body = memoInputSchema
-      .partial()
-      .merge(expectedVersion)
-      .extend({ archived: z.boolean().optional() })
-      .parse(request.body);
-    const current = sqlite
-      .prepare('SELECT * FROM memo_cards WHERE id=? AND workspace_id=? AND author_id=?')
-      .get(memoId, request.currentUser!.workspaceId, request.currentUser!.id) as MemoRow | undefined;
-    if (!current) return reply.code(404).send({ error: 'NOT_FOUND' });
-    if (current.version !== body.expectedVersion) return reply.code(409).send({ error: 'VERSION_CONFLICT' });
-    sqlite.transaction(() => {
-      sqlite
-        .prepare(
-          'UPDATE memo_cards SET project_id=?,title=?,content_md=?,color=?,pinned=?,archived_at=?,version=version+1,updated_at=? WHERE id=?'
-        )
-        .run(
-          body.projectId === undefined ? current.project_id : body.projectId,
-          body.title ?? current.title,
-          body.contentMd ?? current.content_md,
-          body.color ?? current.color,
-          body.pinned === undefined ? current.pinned : body.pinned ? 1 : 0,
-          body.archived === undefined ? current.archived_at : body.archived ? now() : null,
-          now(),
-          memoId
-        );
-      if (body.tagIds)
-        replaceTags('memo_card_tags', 'memo_card_id', memoId, body.tagIds, request.currentUser!.workspaceId);
-    })();
-    return { ok: true };
-  });
-  app.delete('/api/memos/:id', { preHandler: requireUser }, async (request, reply) => {
-    const { id: memoId } = uuidParam.parse(request.params);
-    sqlite
-      .prepare('DELETE FROM memo_cards WHERE id=? AND workspace_id=? AND author_id=?')
-      .run(memoId, request.currentUser!.workspaceId, request.currentUser!.id);
-    return reply.code(204).send();
-  });
-  app.post('/api/memos/:id/convert', { preHandler: requireUser }, async (request, reply) => {
-    const { id: memoId } = uuidParam.parse(request.params);
-    const body = z
-      .object({
-        weekYear: z.number().int(),
-        weekNumber: z.number().int().min(1).max(53),
-        type: z.enum(reportItemTypes),
-        projectId: z.string().uuid().nullable().optional()
-      })
-      .parse(request.body);
-    const memo = sqlite
-      .prepare('SELECT * FROM memo_cards WHERE id=? AND workspace_id=? AND author_id=?')
-      .get(memoId, request.currentUser!.workspaceId, request.currentUser!.id) as MemoRow | undefined;
-    if (!memo) return reply.code(404).send({ error: 'NOT_FOUND' });
-    if (memo.converted_report_item_id)
-      return reply
-        .code(409)
-        .send({ error: 'ALREADY_CONVERTED', reportItemId: memo.converted_report_item_id });
-    const report = ensureReport(
-      request.currentUser!.workspaceId,
-      request.currentUser!.id,
-      body.weekYear,
-      body.weekNumber
-    );
-    const itemId = id();
-    const timestamp = now();
-    sqlite.transaction(() => {
-      const pos = (
-        sqlite
-          .prepare('SELECT COALESCE(MAX(position),-1)+1 AS p FROM report_items WHERE report_id=? AND type=?')
-          .get(report.id, body.type) as { p: number }
-      ).p;
-      const progress = body.type === 'completed' ? 'completed' : 'incomplete';
-      sqlite
-        .prepare(
-          'INSERT INTO report_items(id,report_id,project_id,type,content_md,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)'
-        )
-        .run(
-          itemId,
-          report.id,
-          body.projectId ?? memo.project_id,
-          body.type,
-          `## ${memo.title}\n\n${memo.content_md}`,
-          progress,
-          '',
-          pos,
-          1,
-          timestamp,
-          timestamp
-        );
-      const memoTags = sqlite
-        .prepare('SELECT tag_id FROM memo_card_tags WHERE memo_card_id=?')
-        .all(memoId) as Array<{ tag_id: string }>;
-      replaceTags(
-        'report_item_tags',
-        'report_item_id',
-        itemId,
-        memoTags.map((t) => t.tag_id),
-        request.currentUser!.workspaceId
-      );
-      sqlite
-        .prepare('UPDATE memo_cards SET converted_report_item_id=?,version=version+1,updated_at=? WHERE id=?')
-        .run(itemId, timestamp, memoId);
-      sqlite
-        .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
-        .run(timestamp, report.id);
-    })();
-    return reply
-      .code(201)
-      .send({ reportItemId: itemId, weekYear: body.weekYear, weekNumber: body.weekNumber });
   });
 
   app.get('/api/calendar', { preHandler: requireUser }, async (request) => {

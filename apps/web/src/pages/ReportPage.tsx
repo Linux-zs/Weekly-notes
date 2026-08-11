@@ -29,7 +29,6 @@ import {
   ImagePlus,
   Pencil,
   Plus,
-  Printer,
   RefreshCcw,
   Trash2
 } from 'lucide-react';
@@ -51,7 +50,8 @@ import {
   weeksInIsoYear
 } from '../lib';
 
-const sections = Object.keys(sectionLabels) as ReportItemType[];
+const sections: ReportItemType[] = ['completed', 'next_plan'];
+const copySections: ReportItemType[] = ['completed', 'other', 'next_plan'];
 type User = { id: string; displayName: string; email: string | null; avatarUrl: string | null };
 type ReportWeekSummary = { year: number; weeks: Array<{ weekNumber: number; itemCount: number }> };
 type ProjectItemGroup = { key: string; project: Project | null; items: ReportItem[] };
@@ -149,41 +149,28 @@ export function ReportPage({ user }: { user: User }) {
   return (
     <div className="page report-page">
       <header className="week-hero">
-        <div className="week-kicker">
-          <CalendarDays size={16} />
-          <span>
-            {year} · WEEK {String(week).padStart(2, '0')}
-          </span>
-        </div>
-        <div className="week-title-row">
-          <div>
-            <h1>第 {week} 周工作汇报</h1>
+        <div className="week-main-row">
+          <div className="week-title-block">
+            <div className="week-kicker">
+              <CalendarDays size={16} />
+              <span>
+                {year} · WEEK {String(week).padStart(2, '0')}
+              </span>
+            </div>
+            <h1>工作汇报</h1>
             <p>
               {formatDate(data.weekStart)} — {formatDate(data.weekEnd)} · 汇报人：{user.displayName}
             </p>
             <HolidaySummary report={data} />
           </div>
-          <div className="week-actions">
-            <div className="week-nav">
-              <button className="icon-button bordered" onClick={() => move(-1)} aria-label="上一周">
-                <ArrowLeft />
-              </button>
-              <button className="button secondary compact-button" onClick={() => navigate('/')}>
-                回到本周
-              </button>
-              <button className="icon-button bordered" onClick={() => move(1)} aria-label="下一周">
-                <ArrowRight />
-              </button>
-            </div>
-            <div className="report-output-actions">
-              <button className="button secondary compact-button" onClick={copyReport}>
-                {copied ? <Check size={15} /> : <Copy size={15} />} {copied ? '已复制' : '复制汇报'}
-              </button>
-              <button className="button compact-button" onClick={() => window.print()}>
-                <Printer size={15} />
-                打印 / PDF
-              </button>
-            </div>
+          <ReportOverview report={data} />
+          <div className="week-nav">
+            <button className="icon-button bordered" onClick={() => move(-1)} aria-label="上一周">
+              <ArrowLeft />
+            </button>
+            <button className="icon-button bordered" onClick={() => move(1)} aria-label="下一周">
+              <ArrowRight />
+            </button>
           </div>
         </div>
         <WeekNavigator
@@ -205,7 +192,6 @@ export function ReportPage({ user }: { user: User }) {
       {addMutation.error && (
         <div className="page-action-error">添加条目失败：{addMutation.error.message}</div>
       )}
-      <ReportOverview report={data} />
       <div className="report-sections report-sections-focused">
         <ReportSection
           key={activeType}
@@ -219,9 +205,26 @@ export function ReportPage({ user }: { user: User }) {
           onNext={() => setActiveSection((index) => Math.min(sections.length - 1, index + 1))}
           canPrevious={activeSection > 0}
           canNext={activeSection < sections.length - 1}
+          onCopy={activeType === 'completed' ? copyReport : undefined}
+          copied={copied}
         />
+        {activeType === 'completed' && (
+          <ReportSection
+            type="other"
+            items={data.items.filter((item) => item.type === 'other')}
+            report={data}
+            projects={activeProjects}
+            onAdd={(projectId) => addMutation.mutate({ type: 'other', projectId })}
+            index={activeSection}
+            onPrevious={() => undefined}
+            onNext={() => undefined}
+            canPrevious={false}
+            canNext={false}
+            copied={false}
+            supplementary
+          />
+        )}
       </div>
-      <PrintableReport report={data} projects={projects.data!.projects} />
     </div>
   );
 }
@@ -233,7 +236,7 @@ function buildReportText(report: WeeklyReport, projects: Project[]) {
     `汇报人：${report.author.displayName}`,
     ''
   ];
-  for (const type of sections) {
+  for (const type of copySections) {
     lines.push(`【${sectionLabels[type]}】`);
     const items = report.items.filter((item) => item.type === type && item.contentMd.trim());
     if (!items.length) lines.push('无');
@@ -250,38 +253,6 @@ function buildReportText(report: WeeklyReport, projects: Project[]) {
     lines.push('');
   }
   return lines.join('\n').trim();
-}
-
-function PrintableReport({ report, projects }: { report: WeeklyReport; projects: Project[] }) {
-  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
-  return (
-    <div className="print-report">
-      {sections.map((type, index) => (
-        <section key={type}>
-          <header>
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <h2>{sectionLabels[type]}</h2>
-          </header>
-          {report.items
-            .filter((item) => item.type === type && item.contentMd.trim())
-            .map((item, itemIndex) => (
-              <article key={item.id}>
-                <strong>{itemIndex + 1}</strong>
-                <div>
-                  <div className="print-item-meta">
-                    {item.projectId && <span>{projectNames.get(item.projectId) ?? '已归档项目'}</span>}
-                    <span>{progressLabels[item.progress]}</span>
-                    {item.occurredOn && <span>{item.occurredOn}</span>}
-                  </div>
-                  <Markdown content={item.contentMd} hideImages />
-                  {item.note && <p className="print-note">备注：{item.note}</p>}
-                </div>
-              </article>
-            ))}
-        </section>
-      ))}
-    </div>
-  );
 }
 
 function PageFrame({ title, children }: { title: string; children: React.ReactNode }) {
@@ -397,10 +368,8 @@ function ReportOverview({ report }: { report: WeeklyReport }) {
   const pending = visibleItems.filter((item) => item.progress === 'incomplete').length;
   const projectIds = new Set(visibleItems.map((item) => item.projectId).filter(Boolean));
   return (
-    <section className="briefing-summary report-overview">
-      <div className="briefing-summary-copy">
-        <h2>本周工作概览</h2>
-      </div>
+    <section className="briefing-summary week-overview" aria-label="本周工作概览">
+      <h2 className="visually-hidden">本周工作概览</h2>
       <dl className="briefing-metrics">
         <div>
           <dt>汇报事项</dt>
@@ -433,7 +402,10 @@ function ReportSection({
   onPrevious,
   onNext,
   canPrevious,
-  canNext
+  canNext,
+  onCopy,
+  copied,
+  supplementary = false
 }: {
   type: ReportItemType;
   items: ReportItem[];
@@ -445,6 +417,9 @@ function ReportSection({
   onNext: () => void;
   canPrevious: boolean;
   canNext: boolean;
+  onCopy?: () => void;
+  copied: boolean;
+  supplementary?: boolean;
 }) {
   const qc = useQueryClient();
   const sensors = useSensors(
@@ -465,34 +440,46 @@ function ReportSection({
   const groups = groupItemsByProject(items, projects);
   return (
     <section
-      className="report-section project-table-section"
+      className={`report-section project-table-section${supplementary ? ' report-section-supplementary' : ''}`}
       style={{ '--section-index': index } as React.CSSProperties}
     >
       <div className="section-heading">
         <div>
-          <span className={`section-index section-${type}`}>{String(index + 1).padStart(2, '0')}</span>
+          <span className={`section-index section-${type}`}>
+            {supplementary ? '附' : String(index + 1).padStart(2, '0')}
+          </span>
           <div>
             <div className="section-title-line">
               <h2>{sectionLabels[type]}</h2>
-              <nav className="section-switcher" aria-label="切换周报分类">
-                <button onClick={onPrevious} disabled={!canPrevious} aria-label="上一个分类">
-                  <ArrowLeft size={14} />
-                </button>
-                <span>
-                  {index + 1} / {sections.length}
-                </span>
-                <button onClick={onNext} disabled={!canNext} aria-label="下一个分类">
-                  <ArrowRight size={14} />
-                </button>
-              </nav>
+              {!supplementary && (
+                <nav className="section-switcher" aria-label="切换周报分类">
+                  <button onClick={onPrevious} disabled={!canPrevious} aria-label="上一个分类">
+                    <ArrowLeft size={14} />
+                  </button>
+                  <span>
+                    {index + 1} / {sections.length}
+                  </span>
+                  <button onClick={onNext} disabled={!canNext} aria-label="下一个分类">
+                    <ArrowRight size={14} />
+                  </button>
+                </nav>
+              )}
             </div>
             <p>{sectionHints[type]}</p>
           </div>
         </div>
-        <button className="button ghost" onClick={() => onAdd(null)}>
-          <Plus size={17} />
-          添加
-        </button>
+        <div className="section-heading-actions">
+          {onCopy && (
+            <button className="button secondary compact-button" onClick={onCopy}>
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              {copied ? '已复制' : '复制汇报'}
+            </button>
+          )}
+          <button className="button ghost" onClick={() => onAdd(null)}>
+            <Plus size={17} />
+            添加
+          </button>
+        </div>
       </div>
       {reorder.error && <div className="page-action-error">排序保存失败：{reorder.error.message}</div>}
       {items.length ? (
@@ -830,7 +817,6 @@ function ReportItemRow({
               className={`row-content-preview${content ? '' : ' placeholder'}`}
               onClick={singleClick}
               onDoubleClick={doubleClick}
-              title="单击编辑，双击打开详情"
             >
               {displayContent}
             </button>

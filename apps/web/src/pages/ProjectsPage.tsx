@@ -5,10 +5,10 @@ import { useState } from 'react';
 import { api } from '../api';
 import { EmptyState, ErrorState, Loading, Modal } from '../components';
 
-const palette = ['#2F5597', '#990000', '#ED7D31', '#FFD966', '#808080', '#44546A'];
+const palette = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 type ProjectDraft = { name: string; color: string };
 
-export function ProjectsPage() {
+export function ProjectSettings() {
   const qc = useQueryClient();
   const [editor, setEditor] = useState<Project | null | undefined>(undefined);
   const [draft, setDraft] = useState<ProjectDraft>({ name: '', color: palette[0] });
@@ -65,15 +65,15 @@ export function ProjectsPage() {
   });
   if (projects.isLoading)
     return (
-      <div className="page">
+      <section id="projects" className="settings-card vertical settings-projects">
         <Loading />
-      </div>
+      </section>
     );
   if (projects.error)
     return (
-      <div className="page">
+      <section id="projects" className="settings-card vertical settings-projects">
         <ErrorState message={projects.error.message} onRetry={() => projects.refetch()} />
-      </div>
+      </section>
     );
   const active = projects.data!.projects.filter((project) => !project.archivedAt);
   const archived = projects.data!.projects.filter((project) => project.archivedAt);
@@ -137,51 +137,55 @@ export function ProjectsPage() {
     </div>
   );
   return (
-    <div className="page">
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">项目管理</span>
-          <h1>项目</h1>
-          <p>维护项目边界、颜色、顺序与周报归属。</p>
-        </div>
-        <button className="button" onClick={openCreate}>
-          <Plus size={17} />
-          新建项目
-        </button>
-      </div>
-      {(updateProject.error || reorder.error) && (
-        <div className="page-action-error">操作失败：{(updateProject.error ?? reorder.error)!.message}</div>
-      )}
-      <div className="management-grid projects-only">
-        <section className="management-panel">
-          <div className="panel-heading">
-            <h2>进行中</h2>
-            <span>{active.length} 个项目</span>
+    <>
+      <section id="projects" className="settings-card vertical settings-projects">
+        <div className="panel-heading">
+          <div>
+            <h2>
+              <FolderKanban size={18} />
+              项目管理
+            </h2>
+            <p>维护项目颜色、显示顺序与周报归属。</p>
           </div>
-          {active.length ? (
-            <div className="project-list">
-              {active.map((project, index) => renderProject(project, index, active))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={<FolderKanban />}
-              heading="还没有项目"
-              body="建立第一个项目，让每条周报都有清晰归属。"
-            />
-          )}
-        </section>
-        {archived.length > 0 && (
-          <section className="management-panel archived-projects">
-            <div className="panel-heading">
-              <h2>已归档</h2>
-              <span>{archived.length} 个项目</span>
-            </div>
-            <div className="project-list">
-              {archived.map((project, index) => renderProject(project, index, archived))}
-            </div>
-          </section>
+          <button className="button" onClick={openCreate}>
+            <Plus size={17} />
+            新建项目
+          </button>
+        </div>
+        {(updateProject.error || reorder.error) && (
+          <div className="page-action-error">操作失败：{(updateProject.error ?? reorder.error)!.message}</div>
         )}
-      </div>
+        <div className="project-settings-groups">
+          <div className="project-settings-group">
+            <div className="project-settings-heading">
+              <h3>进行中</h3>
+              <span>{active.length} 个项目</span>
+            </div>
+            {active.length ? (
+              <div className="project-list">
+                {active.map((project, index) => renderProject(project, index, active))}
+              </div>
+            ) : (
+              <EmptyState
+                icon={<FolderKanban />}
+                heading="还没有项目"
+                body="建立第一个项目，让每条周报都有清晰归属。"
+              />
+            )}
+          </div>
+          {archived.length > 0 && (
+            <div className="project-settings-group archived-projects">
+              <div className="project-settings-heading">
+                <h3>已归档</h3>
+                <span>{archived.length} 个项目</span>
+              </div>
+              <div className="project-list">
+                {archived.map((project, index) => renderProject(project, index, archived))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
       {editor !== undefined && (
         <ProjectEditor
           project={editor}
@@ -208,7 +212,7 @@ export function ProjectsPage() {
             </div>
             <div>
               <strong>{deleteProject.name}</strong>
-              <p>删除后，尚未形成周报的素材会变为未归属。</p>
+              <p>删除后，关联的周报条目会变为未归属。</p>
             </div>
           </div>
           {remove.error && <div className="delete-error">{remove.error.message}</div>}
@@ -230,7 +234,7 @@ export function ProjectsPage() {
           </div>
         </Modal>
       )}
-    </div>
+    </>
   );
 }
 

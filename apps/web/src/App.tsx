@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { BookOpenText, FolderKanban, LogOut, Menu, Search, Settings, StickyNote, X } from 'lucide-react';
+import { BookOpenText, LogOut, Menu, Search, Settings, X } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, ApiError } from './api';
@@ -11,10 +11,6 @@ const ReportPage = lazy(() =>
 );
 const SearchPage = lazy(() =>
   import('./pages/SearchPage').then((module) => ({ default: module.SearchPage }))
-);
-const MemosPage = lazy(() => import('./pages/MemosPage').then((module) => ({ default: module.MemosPage })));
-const ProjectsPage = lazy(() =>
-  import('./pages/ProjectsPage').then((module) => ({ default: module.ProjectsPage }))
 );
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage }))
@@ -66,8 +62,6 @@ export function App() {
   const links = [
     ['/', BookOpenText, '工作周报'],
     ['/search', Search, '资料检索'],
-    ['/memos', StickyNote, '工作素材'],
-    ['/projects', FolderKanban, '项目管理'],
     ['/settings', Settings, '系统设置']
   ] as const;
   return (
@@ -131,8 +125,7 @@ export function App() {
             <Route path="/" element={<ReportPage user={user} />} />
             <Route path="/week/:year/:week" element={<ReportPage user={user} />} />
             <Route path="/search" element={<SearchPage />} />
-            <Route path="/memos" element={<MemosPage />} />
-            <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/projects" element={<Navigate to="/settings#projects" replace />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -131,28 +131,6 @@ export const reportAttachments = sqliteTable('report_attachments', {
   sizeBytes: integer('size_bytes').notNull(),
   createdAt: text('created_at').notNull()
 });
-export const memoCards = sqliteTable('memo_cards', {
-  id: text('id').primaryKey(),
-  workspaceId: text('workspace_id').notNull(),
-  authorId: text('author_id').notNull(),
-  projectId: text('project_id'),
-  title: text('title').notNull(),
-  contentMd: text('content_md').notNull(),
-  color: text('color').notNull(),
-  pinned: integer('pinned', { mode: 'boolean' }).notNull(),
-  archivedAt: text('archived_at'),
-  convertedReportItemId: text('converted_report_item_id'),
-  version: integer('version').notNull(),
-  ...timestamps
-});
-export const memoCardTags = sqliteTable(
-  'memo_card_tags',
-  {
-    memoCardId: text('memo_card_id').notNull(),
-    tagId: text('tag_id').notNull()
-  },
-  (t) => [primaryKey({ columns: [t.memoCardId, t.tagId] })]
-);
 export const calendarDays = sqliteTable('calendar_days', {
   date: text('date').primaryKey(),
   kind: text('kind').notNull(),

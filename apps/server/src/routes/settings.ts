@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { now, sqlite } from '../db/index.js';
+import { id, now, sqlite } from '../db/index.js';
+import { detectImage } from '../lib/image.js';
 import { createBackup } from '../services/backup.js';
 import { importHolidayYear } from '../services/holidays.js';
 import { requireUser } from '../types.js';
@@ -52,12 +53,28 @@ function validateTimezone(value: string) {
   }
 }
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+const avatarUrlPrefix = '/api/profile-avatars/';
+const maxAvatarBytes = 3 * 1024 * 1024;
+const avatarFileParam = z.object({ file: z.string().regex(/^[0-9a-f-]{36}\.(png|jpg|gif|webp)$/i) });
+
+function avatarDirectory() {
+  return path.join(config.uploadDir, 'avatars');
+}
+
+function localAvatarPath(avatarUrl: string | null) {
+  if (!avatarUrl?.startsWith(avatarUrlPrefix)) return null;
+  const file = avatarUrl.slice(avatarUrlPrefix.length);
+  if (!avatarFileParam.safeParse({ file }).success) return null;
+  return path.join(avatarDirectory(), file);
+}
 
 export async function registerSettings(app: FastifyInstance) {
   app.get('/api/settings', { preHandler: requireUser }, async (request) => {
     const user = request.currentUser!;
     const profile = sqlite
-      .prepare('SELECT display_name AS displayName,email,timezone FROM users WHERE id=?')
+      .prepare(
+        'SELECT display_name AS displayName,email,timezone,avatar_url AS avatarUrl FROM users WHERE id=?'
+      )
       .get(user.id);
     const workspace = sqlite.prepare('SELECT id,name,type FROM workspaces WHERE id=?').get(user.workspaceId);
     const workspaces = sqlite
@@ -113,6 +130,71 @@ export async function registerSettings(app: FastifyInstance) {
       .prepare('UPDATE users SET display_name=?,timezone=?,updated_at=? WHERE id=?')
       .run(input.displayName, input.timezone, now(), request.currentUser!.id);
     return input;
+  });
+  app.post('/api/settings/avatar', { preHandler: requireUser }, async (request, reply) => {
+    let upload;
+    try {
+      upload = await request.file({ limits: { fileSize: maxAvatarBytes } });
+    } catch {
+      return reply.code(413).send({ error: 'AVATAR_TOO_LARGE', message: '头像不能超过 3 MB' });
+    }
+    if (!upload) return reply.code(400).send({ error: 'AVATAR_REQUIRED', message: '请选择头像图片' });
+    let buffer: Buffer;
+    try {
+      buffer = await upload.toBuffer();
+    } catch {
+      return reply.code(413).send({ error: 'AVATAR_TOO_LARGE', message: '头像不能超过 3 MB' });
+    }
+    const image = detectImage(buffer);
+    if (!image)
+      return reply
+        .code(415)
+        .send({ error: 'UNSUPPORTED_AVATAR', message: '仅支持 PNG、JPEG、GIF 或 WebP 图片' });
+    const userId = request.currentUser!.id;
+    const current = sqlite.prepare('SELECT avatar_url AS avatarUrl FROM users WHERE id=?').get(userId) as
+      { avatarUrl: string | null } | undefined;
+    if (!current) return reply.code(404).send({ error: 'NOT_FOUND' });
+    const file = `${id()}.${image.extension}`;
+    const directory = avatarDirectory();
+    const target = path.join(directory, file);
+    const avatarUrl = `${avatarUrlPrefix}${file}`;
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(target, buffer, { flag: 'wx' });
+    try {
+      sqlite.prepare('UPDATE users SET avatar_url=?,updated_at=? WHERE id=?').run(avatarUrl, now(), userId);
+    } catch (error) {
+      fs.rmSync(target, { force: true });
+      throw error;
+    }
+    const previous = localAvatarPath(current.avatarUrl);
+    if (previous) fs.rmSync(previous, { force: true });
+    return reply.code(201).send({ avatarUrl });
+  });
+  app.get('/api/profile-avatars/:file', { preHandler: requireUser }, async (request, reply) => {
+    const { file } = avatarFileParam.parse(request.params);
+    const avatarUrl = `${avatarUrlPrefix}${file}`;
+    const visible = sqlite
+      .prepare(
+        'SELECT 1 FROM users u JOIN workspace_members wm ON wm.user_id=u.id WHERE u.avatar_url=? AND wm.workspace_id=?'
+      )
+      .get(avatarUrl, request.currentUser!.workspaceId);
+    if (!visible) return reply.code(404).send({ error: 'NOT_FOUND' });
+    const target = path.join(avatarDirectory(), file);
+    if (!fs.existsSync(target)) return reply.code(404).send({ error: 'FILE_NOT_FOUND' });
+    const extension = path.extname(file).slice(1).toLowerCase();
+    const mimeType =
+      extension === 'png'
+        ? 'image/png'
+        : extension === 'jpg'
+          ? 'image/jpeg'
+          : extension === 'gif'
+            ? 'image/gif'
+            : 'image/webp';
+    return reply
+      .type(mimeType)
+      .header('Content-Length', String(fs.statSync(target).size))
+      .header('Cache-Control', 'private, max-age=31536000, immutable')
+      .send(fs.createReadStream(target));
   });
   app.patch('/api/settings/workspace', { preHandler: requireUser }, async (request, reply) => {
     if (request.currentUser!.role !== 'owner')
@@ -224,7 +306,7 @@ export async function registerSettings(app: FastifyInstance) {
       exportedAt: now(),
       profile: sqlite
         .prepare(
-          'SELECT id,display_name AS displayName,email,timezone,created_at AS createdAt FROM users WHERE id=?'
+          'SELECT id,display_name AS displayName,email,timezone,avatar_url AS avatarUrl,created_at AS createdAt FROM users WHERE id=?'
         )
         .get(user.id),
       workspace: sqlite
@@ -244,11 +326,6 @@ export async function registerSettings(app: FastifyInstance) {
       reportItems: sqlite
         .prepare(
           'SELECT ri.id,ri.report_id AS reportId,ri.project_id AS projectId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
-        )
-        .all(workspaceId, user.id),
-      memos: sqlite
-        .prepare(
-          'SELECT id,project_id AS projectId,title,content_md AS contentMd,color,pinned,archived_at AS archivedAt,converted_report_item_id AS convertedReportItemId,created_at AS createdAt,updated_at AS updatedAt FROM memo_cards WHERE workspace_id=? AND author_id=?'
         )
         .all(workspaceId, user.id),
       attachments: sqlite

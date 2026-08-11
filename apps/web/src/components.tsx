@@ -87,7 +87,7 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
-const tagColors = ['#2F5597', '#990000', '#ED7D31', '#808080', '#44546A'];
+const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 export function TagField({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);

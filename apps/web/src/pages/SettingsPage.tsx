@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Tag } from '@zhoubao/shared';
 import {
   CheckCircle2,
+  Camera,
   CloudDownload,
   Database,
   Download,
@@ -15,9 +16,10 @@ import {
   Unlink,
   UserRound
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { ErrorState, Loading, Modal } from '../components';
+import { ProjectSettings } from './ProjectsPage';
 
 const names: Record<string, string> = {
   google: 'Google',
@@ -26,7 +28,7 @@ const names: Record<string, string> = {
   apple: 'Apple'
 };
 type SettingsData = {
-  profile: { displayName: string; email: string | null; timezone: string };
+  profile: { displayName: string; email: string | null; timezone: string; avatarUrl: string | null };
   workspace: { id: string; name: string; type: string };
   workspaces: Array<{ id: string; name: string; type: string; role: string }>;
   members: Array<{
@@ -55,7 +57,7 @@ type Account = {
   displayName: string | null;
   lastLoginAt: string | null;
 };
-const tagColors = ['#2F5597', '#990000', '#ED7D31', '#FFD966', '#808080', '#44546A'];
+const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 const formatBytes = (bytes: number) =>
   bytes < 1024
     ? `${bytes} B`
@@ -122,6 +124,7 @@ function SettingsContent({
 }) {
   const [displayName, setDisplayName] = useState(settings.profile.displayName);
   const [timezone, setTimezone] = useState(settings.profile.timezone);
+  const avatarInput = useRef<HTMLInputElement>(null);
   const [workspaceName, setWorkspaceName] = useState(settings.workspace.name);
   const [holidayYear, setHolidayYear] = useState(new Date().getFullYear());
   const [inviteEmail, setInviteEmail] = useState('');
@@ -130,12 +133,28 @@ function SettingsContent({
   const [editTag, setEditTag] = useState<Tag | null>(null);
   const [deleteTagTarget, setDeleteTagTarget] = useState<Tag | null>(null);
   const [compact, setCompact] = useState(() => localStorage.getItem('weekly-report:compact') === 'true');
+  useEffect(() => {
+    if (location.hash === '#projects')
+      requestAnimationFrame(() => document.getElementById('projects')?.scrollIntoView({ block: 'start' }));
+  }, []);
   const profile = useMutation({
     mutationFn: () =>
       api('/api/settings/profile', { method: 'PATCH', body: JSON.stringify({ displayName, timezone }) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
       qc.invalidateQueries({ queryKey: ['me'] });
+    }
+  });
+  const avatar = useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData();
+      body.append('avatar', file);
+      return api<{ avatarUrl: string }>('/api/settings/avatar', { method: 'POST', body });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['me'] });
+      if (avatarInput.current) avatarInput.current.value = '';
     }
   });
   const workspace = useMutation({
@@ -191,7 +210,6 @@ function SettingsContent({
       setDeleteTagTarget(null);
       qc.invalidateQueries({ queryKey: ['tags'] });
       qc.invalidateQueries({ queryKey: ['report'] });
-      qc.invalidateQueries({ queryKey: ['memos'] });
     }
   });
   const saveTag = useMutation({
@@ -201,7 +219,6 @@ function SettingsContent({
       setEditTag(null);
       qc.invalidateQueries({ queryKey: ['tags'] });
       qc.invalidateQueries({ queryKey: ['report'] });
-      qc.invalidateQueries({ queryKey: ['memos'] });
     }
   });
   const applyCompact = (value: boolean) => {
@@ -216,7 +233,7 @@ function SettingsContent({
         <div>
           <span className="eyebrow">系统控制台</span>
           <h1>设置</h1>
-          <p>管理身份、空间、标签、数据和本地运维状态。</p>
+          <p>管理身份、空间、项目、标签和数据。</p>
         </div>
       </div>
       <div className="settings-dashboard">
@@ -227,7 +244,7 @@ function SettingsContent({
                 <UserRound size={18} />
                 个人资料
               </h2>
-              <p>用于周报署名与日期展示。</p>
+              <p>用于周报署名、头像与日期展示。</p>
             </div>
           </div>
           <form
@@ -237,6 +254,46 @@ function SettingsContent({
               profile.mutate();
             }}
           >
+            <div className="profile-avatar-row">
+              <div className="profile-avatar-preview">
+                {settings.profile.avatarUrl ? (
+                  <img src={settings.profile.avatarUrl} alt={`${displayName}的头像`} />
+                ) : (
+                  <span>{displayName.slice(0, 1) || '周'}</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => avatarInput.current?.click()}
+                  disabled={avatar.isPending}
+                  aria-label="上传自定义头像"
+                >
+                  <Camera size={15} />
+                </button>
+              </div>
+              <div>
+                <strong>个人头像</strong>
+                <span>支持 PNG、JPEG、GIF、WebP，最大 3 MB</span>
+                <button
+                  type="button"
+                  className="button secondary compact-button"
+                  onClick={() => avatarInput.current?.click()}
+                  disabled={avatar.isPending}
+                >
+                  {avatar.isPending ? '上传中…' : settings.profile.avatarUrl ? '更换头像' : '上传头像'}
+                </button>
+                <input
+                  ref={avatarInput}
+                  className="visually-hidden"
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) avatar.mutate(file);
+                  }}
+                />
+              </div>
+            </div>
+            {avatar.error && <div className="form-error">{avatar.error.message}</div>}
             <label>
               显示名称
               <input
@@ -297,6 +354,7 @@ function SettingsContent({
             </button>
           </form>
         </section>
+        <ProjectSettings />
         <section className="settings-card vertical settings-team">
           <div className="panel-heading">
             <div>
@@ -323,7 +381,11 @@ function SettingsContent({
           <div className="member-list">
             {settings.members.map((member) => (
               <div key={member.id}>
-                <span className="avatar avatar-fallback">{member.displayName.slice(0, 1)}</span>
+                {member.avatarUrl ? (
+                  <img className="avatar" src={member.avatarUrl} alt="" />
+                ) : (
+                  <span className="avatar avatar-fallback">{member.displayName.slice(0, 1)}</span>
+                )}
                 <div>
                   <strong>{member.displayName}</strong>
                   <span>
@@ -516,7 +578,7 @@ function SettingsContent({
                 <TagIcon size={18} />
                 标签管理
               </h2>
-              <p>编辑或清理周报与素材共用标签。</p>
+              <p>编辑或清理周报条目使用的标签。</p>
             </div>
           </div>
           <div className="tag-management">
@@ -539,7 +601,7 @@ function SettingsContent({
                 </div>
               ))
             ) : (
-              <span className="muted">尚未创建标签，可在编辑周报或素材时创建。</span>
+              <span className="muted">尚未创建标签，可在编辑周报条目时创建。</span>
             )}
           </div>
         </section>
@@ -602,7 +664,7 @@ function SettingsContent({
             if (!open && !deleteTag.isPending) setDeleteTagTarget(null);
           }}
           title="删除标签"
-          description="标签会从所有周报和素材中移除，原始内容不会被删除。"
+          description="标签会从所有周报条目中移除，原始内容不会被删除。"
         >
           <div className="delete-confirmation">
             <div className="delete-confirmation-icon">

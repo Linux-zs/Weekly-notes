@@ -11,18 +11,15 @@ CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS auth_flows (id TEXT PRIMARY KEY, provider TEXT NOT NULL, state TEXT NOT NULL, verifier TEXT, nonce TEXT, link_user_id TEXT, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name TEXT NOT NULL, color TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS weekly_reports (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, week_year INTEGER NOT NULL, week_number INTEGER NOT NULL, week_start TEXT NOT NULL, week_end TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(workspace_id,author_id,week_year,week_number));
-CREATE TABLE IF NOT EXISTS report_items (id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES weekly_reports(id) ON DELETE CASCADE, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL, type TEXT NOT NULL CHECK(type IN ('completed','next_plan','risk','other')), content_md TEXT NOT NULL DEFAULT '', occurred_on TEXT, position INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS report_items (id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES weekly_reports(id) ON DELETE CASCADE, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL, type TEXT NOT NULL CHECK(type IN ('completed','next_plan','other')), content_md TEXT NOT NULL DEFAULT '', occurred_on TEXT, position INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name TEXT NOT NULL, normalized_name TEXT NOT NULL, color TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(workspace_id,normalized_name));
 CREATE TABLE IF NOT EXISTS report_item_tags (report_item_id TEXT NOT NULL REFERENCES report_items(id) ON DELETE CASCADE, tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(report_item_id,tag_id));
-CREATE TABLE IF NOT EXISTS memo_cards (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL, title TEXT NOT NULL, content_md TEXT NOT NULL DEFAULT '', color TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, archived_at TEXT, converted_report_item_id TEXT REFERENCES report_items(id) ON DELETE SET NULL, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS memo_card_tags (memo_card_id TEXT NOT NULL REFERENCES memo_cards(id) ON DELETE CASCADE, tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(memo_card_id,tag_id));
 CREATE TABLE IF NOT EXISTS calendar_days (date TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('holiday','adjusted_workday')), name TEXT NOT NULL, source_year INTEGER NOT NULL, source_url TEXT, note TEXT);
 CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id,archived_at,position);
 CREATE INDEX IF NOT EXISTS idx_reports_week ON weekly_reports(workspace_id,week_start DESC);
 CREATE INDEX IF NOT EXISTS idx_items_report ON report_items(report_id,type,position);
 CREATE INDEX IF NOT EXISTS idx_items_project ON report_items(project_id);
 CREATE INDEX IF NOT EXISTS idx_item_tags_tag ON report_item_tags(tag_id,report_item_id);
-CREATE INDEX IF NOT EXISTS idx_memos_workspace ON memo_cards(workspace_id,archived_at,pinned DESC,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_calendar_year ON calendar_days(source_year,date);`,
   `CREATE TABLE IF NOT EXISTS report_attachments (
   id TEXT PRIMARY KEY,
@@ -53,7 +50,10 @@ CREATE TABLE IF NOT EXISTS workspace_invitations (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_invitations_email ON workspace_invitations(email,status,expires_at);
-CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id,user_id);`
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id,user_id);`,
+  `DROP TABLE IF EXISTS memo_card_tags;
+DROP TABLE IF EXISTS memo_cards;`,
+  `UPDATE report_items SET type='other' WHERE type='risk';`
 ];
 
 export function runMigrations(sqlite: Database.Database) {

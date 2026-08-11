@@ -4,13 +4,11 @@ import { marked } from 'marked';
 export const sectionLabels = {
   completed: '本周完成',
   next_plan: '下周计划',
-  risk: '问题与风险',
   other: '其他记录'
 } as const;
 export const sectionHints = {
   completed: '聚焦关键交付、阶段成果与业务价值',
   next_plan: '明确下一阶段目标、动作与预期结果',
-  risk: '列明阻塞、影响范围与需协调事项',
   other: '补充重要信息、会议结论与待跟进事项'
 } as const;
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const reportItemTypes = ['completed', 'next_plan', 'risk', 'other'] as const;
+export const reportItemTypes = ['completed', 'next_plan', 'other'] as const;
 export type ReportItemType = (typeof reportItemTypes)[number];
 export const reportItemProgresses = ['completed', 'answered', 'incomplete'] as const;
 export type ReportItemProgress = (typeof reportItemProgresses)[number];
@@ -24,18 +24,6 @@ export const projectInputSchema = z.object({
     .string()
     .regex(/^#[0-9A-Fa-f]{6}$/)
     .default('#61758A')
-});
-
-export const memoInputSchema = z.object({
-  title: z.string().trim().min(1).max(160),
-  contentMd: z.string().max(30_000).default(''),
-  projectId: z.string().uuid().nullable().optional(),
-  tagIds: z.array(z.string().uuid()).max(20).default([]),
-  color: z
-    .string()
-    .regex(/^#[0-9A-Fa-f]{6}$/)
-    .default('#F2C66D'),
-  pinned: z.boolean().default(false)
 });
 
 export interface UserSummary {

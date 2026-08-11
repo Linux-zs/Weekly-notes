@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
 import { EmptyState, ErrorState, Loading } from '../components';
-import { Markdown, sectionLabels } from '../lib';
+import { sectionLabels } from '../lib';
 
 type Result = {
   id: string;
@@ -37,6 +37,18 @@ const emptyFilters: Filters = {
   tagIds: [],
   tagMode: 'all'
 };
+
+function summarizeResult(content: string) {
+  return (
+    content
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[`#>*_~|=-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || '暂无内容'
+  );
+}
 
 export function SearchPage() {
   const [filters, setFilters] = useState<Filters>(emptyFilters);
@@ -204,10 +216,10 @@ export function SearchPage() {
           <div className="search-results">
             {items.map((result) => (
               <article className="search-result" key={result.id}>
-                <div className="result-meta">
-                  <span className="week-pill">
-                    {result.weekYear} · W{String(result.weekNumber).padStart(2, '0')}
-                  </span>
+                <span className="week-pill">
+                  {result.weekYear} · W{String(result.weekNumber).padStart(2, '0')}
+                </span>
+                <div className="result-context">
                   <span>{sectionLabels[result.type]}</span>
                   {result.projectName && (
                     <span className="project-label">
@@ -222,13 +234,17 @@ export function SearchPage() {
                     </span>
                   ))}
                 </div>
-                <Markdown content={result.contentMd} hideImages />
-                <div className="result-foot">
-                  <Link to={`/week/${result.weekYear}/${result.weekNumber}`}>
-                    打开这一周
-                    <ChevronRight size={15} />
-                  </Link>
-                </div>
+                <p className={`result-summary${result.contentMd.trim() ? '' : ' empty'}`}>
+                  {summarizeResult(result.contentMd)}
+                </p>
+                <Link
+                  className="result-open"
+                  to={`/week/${result.weekYear}/${result.weekNumber}`}
+                  aria-label={`打开 ${result.weekYear} 年第 ${result.weekNumber} 周`}
+                >
+                  <span>打开</span>
+                  <ChevronRight size={15} />
+                </Link>
               </article>
             ))}
           </div>
