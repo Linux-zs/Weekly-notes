@@ -35,6 +35,44 @@ afterAll(async () => {
 const headers = () => ({ cookie, origin: 'http://127.0.0.1:3000' });
 
 describe('authenticated weekly report workflow', () => {
+  it('provisions an uninvited external identity with a personal workspace', async () => {
+    const { provisionLoginIdentity } = await import('./auth.js');
+    const subject = `microsoft-${crypto.randomUUID()}`;
+    const before = sqlite.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number };
+    const provisioned = provisionLoginIdentity(
+      {
+        subject,
+        email: 'new-user@example.com',
+        emailVerified: false,
+        displayName: '新用户',
+        avatarUrl: null
+      },
+      'microsoft'
+    );
+
+    const membership = sqlite
+      .prepare(
+        'SELECT wm.role,w.type FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id WHERE wm.user_id=?'
+      )
+      .get(provisioned.userId) as { role: string; type: string };
+    expect(membership).toEqual({ role: 'owner', type: 'personal' });
+    expect(provisioned.sessionWorkspaceId).toBeUndefined();
+
+    const repeated = provisionLoginIdentity(
+      {
+        subject,
+        email: 'new-user@example.com',
+        emailVerified: false,
+        displayName: '新用户',
+        avatarUrl: null
+      },
+      'microsoft'
+    );
+    const after = sqlite.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number };
+    expect(repeated.userId).toBe(provisioned.userId);
+    expect(after.count).toBe(before.count + 1);
+  });
+
   it('does not retain the removed work material storage or API', async () => {
     const retiredTables = sqlite
       .prepare(

@@ -12,7 +12,6 @@ const envSchema = z.object({
   HOLIDAY_DATA_DIR: z.string().default('./data/holidays'),
   SESSION_COOKIE_NAME: z.string().default('zhoubao_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
-  OWNER_BOOTSTRAP_EMAIL: z.string().email().default('owner@example.com'),
   DEV_AUTH_BYPASS: z.enum(['true', 'false']).default('true'),
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),

@@ -191,7 +191,7 @@ function LoginPage() {
             <span>进入工作汇报空间</span>
           </div>
         </div>
-        {error && <div className="inline-alert">该账号未获授权，或登录流程已经过期。</div>}
+        {error && <div className="inline-alert">登录失败或登录流程已经过期，请重新尝试。</div>}
         <div className="provider-list">
           {providers.isLoading ? (
             <Loading />

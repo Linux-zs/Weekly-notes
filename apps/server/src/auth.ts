@@ -93,7 +93,7 @@ function createSession(reply: FastifyReply, userId: string, workspaceId?: string
   reply.setCookie(config.SESSION_COOKIE_NAME, raw, { ...cookieOptions('/'), expires });
 }
 
-function createOwner(identity: Identity, provider: AuthProvider) {
+function createPersonalUser(identity: Identity, provider: AuthProvider) {
   const userId = id();
   const workspaceId = id();
   const timestamp = now();
@@ -131,11 +131,6 @@ function createOwner(identity: Identity, provider: AuthProvider) {
         timestamp,
         timestamp
       );
-    sqlite
-      .prepare(
-        "INSERT INTO app_state(key,value) VALUES('owner_initialized','true') ON CONFLICT(key) DO UPDATE SET value='true'"
-      )
-      .run();
   })();
   return userId;
 }
@@ -297,15 +292,19 @@ async function resolveIdentity(
   };
 }
 
-function finishIdentity(identity: Identity, provider: AuthProvider, flow: Flow, reply: FastifyReply) {
+export function provisionLoginIdentity(
+  identity: Identity,
+  provider: AuthProvider,
+  linkUserId: string | null = null
+) {
   const existing = sqlite
     .prepare('SELECT user_id FROM auth_accounts WHERE provider=? AND subject=?')
     .get(provider, identity.subject) as { user_id: string } | undefined;
   let userId = existing?.user_id;
   let sessionWorkspaceId: string | undefined;
-  if (flow.link_user_id) {
-    if (existing && existing.user_id !== flow.link_user_id) throw new Error('该身份已绑定其他账号');
-    userId = flow.link_user_id;
+  if (linkUserId) {
+    if (existing && existing.user_id !== linkUserId) throw new Error('该身份已绑定其他账号');
+    userId = linkUserId;
     sqlite
       .prepare(
         `INSERT INTO auth_accounts(id,user_id,provider,subject,email,display_name,last_login_at,created_at)
@@ -318,15 +317,7 @@ function finishIdentity(identity: Identity, provider: AuthProvider, flow: Flow, 
       userId = createInvitedUser(identity, provider, invitation);
       sessionWorkspaceId = invitation.workspace_id;
     }
-    const initialized = sqlite.prepare("SELECT value FROM app_state WHERE key='owner_initialized'").get() as
-      { value: string } | undefined;
-    const bootstrapAllowed =
-      !initialized &&
-      provider === 'google' &&
-      identity.emailVerified &&
-      identity.email?.toLowerCase() === config.OWNER_BOOTSTRAP_EMAIL.toLowerCase();
-    if (!userId && !bootstrapAllowed) throw new Error('该账号未获授权');
-    if (!userId) userId = createOwner(identity, provider);
+    if (!userId) userId = createPersonalUser(identity, provider);
   } else {
     sqlite
       .prepare('UPDATE auth_accounts SET last_login_at=? WHERE provider=? AND subject=?')
@@ -334,6 +325,11 @@ function finishIdentity(identity: Identity, provider: AuthProvider, flow: Flow, 
     const invitation = identity.emailVerified ? pendingInvitation(identity.email) : undefined;
     if (invitation) sessionWorkspaceId = acceptInvitation(userId, invitation);
   }
+  return { userId, sessionWorkspaceId };
+}
+
+function finishIdentity(identity: Identity, provider: AuthProvider, flow: Flow, reply: FastifyReply) {
+  const { userId, sessionWorkspaceId } = provisionLoginIdentity(identity, provider, flow.link_user_id);
   createSession(reply, userId, sessionWorkspaceId);
 }
 
@@ -452,10 +448,10 @@ export async function registerAuth(app: FastifyInstance) {
       { id: string } | undefined;
     if (!user)
       user = {
-        id: createOwner(
+        id: createPersonalUser(
           {
             subject: 'dev-owner',
-            email: config.OWNER_BOOTSTRAP_EMAIL,
+            email: 'dev@local.test',
             emailVerified: true,
             displayName: '周报主人',
             avatarUrl: null

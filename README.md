@@ -38,11 +38,10 @@ pnpm start
 NODE_ENV=production
 APP_ORIGIN=https://weekly.example.com
 TRUST_PROXY=true
-OWNER_BOOTSTRAP_EMAIL=owner@example.com
 DEV_AUTH_BYPASS=false
 ```
 
-`APP_ORIGIN` 必须和身份平台登记的 HTTPS Origin 完全一致。首次登录只允许 `OWNER_BOOTSTRAP_EMAIL` 对应、且邮箱已验证的 Google 身份创建所有者；初始化以后，新身份只能在设置页绑定。
+`APP_ORIGIN` 必须和身份平台登记的 HTTPS Origin 完全一致。任意已启用身份平台返回的有效账号都可以首次登录；系统会为没有团队邀请的新账号自动创建独立的个人周报空间。团队邀请只用于加入共享空间，不再作为登录前置条件。
 
 ### 回调地址
 
