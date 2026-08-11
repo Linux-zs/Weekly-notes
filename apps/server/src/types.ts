@@ -10,7 +10,9 @@ export interface CurrentUser {
 }
 
 declare module 'fastify' {
-  interface FastifyRequest { currentUser: CurrentUser | null; }
+  interface FastifyRequest {
+    currentUser: CurrentUser | null;
+  }
 }
 
 export async function requireUser(request: FastifyRequest, reply: FastifyReply) {

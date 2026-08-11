@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 
 export const migrations = [
-`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+  `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, email TEXT, avatar_url TEXT, timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_items_project ON report_items(project_id);
 CREATE INDEX IF NOT EXISTS idx_item_tags_tag ON report_item_tags(tag_id,report_item_id);
 CREATE INDEX IF NOT EXISTS idx_memos_workspace ON memo_cards(workspace_id,archived_at,pinned DESC,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_calendar_year ON calendar_days(source_year,date);`,
-`CREATE TABLE IF NOT EXISTS report_attachments (
+  `CREATE TABLE IF NOT EXISTS report_attachments (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -35,18 +35,44 @@ CREATE INDEX IF NOT EXISTS idx_calendar_year ON calendar_days(source_year,date);
   size_bytes INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_report_attachments_item ON report_attachments(report_item_id,created_at);`
+CREATE INDEX IF NOT EXISTS idx_report_attachments_item ON report_attachments(report_item_id,created_at);`,
+  `ALTER TABLE report_items ADD COLUMN progress TEXT NOT NULL DEFAULT 'incomplete' CHECK(progress IN ('completed','answered','incomplete'));
+ALTER TABLE report_items ADD COLUMN note TEXT NOT NULL DEFAULT '';
+UPDATE report_items SET progress='completed' WHERE type='completed';`,
+  `ALTER TABLE sessions ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;
+UPDATE sessions SET workspace_id=(SELECT workspace_id FROM workspace_members WHERE user_id=sessions.user_id ORDER BY created_at LIMIT 1);
+CREATE TABLE IF NOT EXISTS workspace_invitations (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','member')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','revoked')),
+  invited_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  accepted_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_invitations_email ON workspace_invitations(email,status,expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id,user_id);`
 ];
 
 export function runMigrations(sqlite: Database.Database) {
-  sqlite.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
-  const applied = new Set((sqlite.prepare('SELECT version FROM schema_migrations').all() as Array<{version:number}>).map((r) => r.version));
+  sqlite.exec(
+    'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)'
+  );
+  const applied = new Set(
+    (sqlite.prepare('SELECT version FROM schema_migrations').all() as Array<{ version: number }>).map(
+      (r) => r.version
+    )
+  );
   migrations.forEach((sql, index) => {
     const version = index + 1;
     if (applied.has(version)) return;
     sqlite.transaction(() => {
       sqlite.exec(sql);
-      sqlite.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)').run(version, new Date().toISOString());
+      sqlite
+        .prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)')
+        .run(version, new Date().toISOString());
     })();
   });
 }

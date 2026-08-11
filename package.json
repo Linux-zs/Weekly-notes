@@ -1,16 +1,31 @@
 {
   "name": "zhoubao",
+  "type": "module",
   "private": true,
   "packageManager": "pnpm@11.16.0",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "pnpm --parallel --filter @zhoubao/server --filter @zhoubao/web dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "lint": "eslint apps packages --max-warnings=0",
+    "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"packages/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"packages/**/*.{ts,tsx}\"",
     "test": "pnpm -r test",
     "start": "pnpm --filter @zhoubao/server start",
     "db:migrate": "pnpm --filter @zhoubao/server db:migrate",
     "db:backup": "pnpm --filter @zhoubao/server db:backup",
     "holiday:import": "pnpm --filter @zhoubao/server holiday:import"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.9.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.66.0"
   }
 }

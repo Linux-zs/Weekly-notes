@@ -1,10 +1,19 @@
 const DAY_MS = 86_400_000;
 
-function isoDate(date: Date) { return date.toISOString().slice(0, 10); }
-function utcDate(value: string) { return new Date(`${value}T00:00:00.000Z`); }
+function isoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+function utcDate(value: string) {
+  return new Date(`${value}T00:00:00.000Z`);
+}
 
 export function shanghaiToday(now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(now);
   const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return `${pick('year')}-${pick('month')}-${pick('day')}`;
 }
@@ -31,4 +40,6 @@ export function isoWeekRange(weekYear: number, weekNumber: number) {
   return { weekStart: isoDate(monday), weekEnd: isoDate(new Date(monday.getTime() + 6 * DAY_MS)) };
 }
 
-export function currentIsoWeek() { return isoWeekForDate(shanghaiToday()); }
+export function currentIsoWeek() {
+  return isoWeekForDate(shanghaiToday());
+}

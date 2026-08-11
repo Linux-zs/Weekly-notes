@@ -1,6 +1,6 @@
 # 周笺
 
-一个面向个人使用、预留团队空间模型的周报 Web 应用。支持多项目周报、标签搜索、Markdown、备忘卡片转换、OIDC/OAuth 登录、中国法定节假日调休和 SQLite 自动备份。
+一个面向个人与小团队的周报 Web 应用。支持多项目周报、团队邀请与空间切换、标签搜索、Markdown、素材转换、汇报复制/打印、OIDC/OAuth 登录、中国法定节假日调休和包含附件的自动备份。
 
 ## 技术栈
 
@@ -15,7 +15,7 @@
 
 ```bash
 pnpm install
-pnpm holiday:import 2026
+pnpm holiday:import <year>
 pnpm dev
 ```
 
@@ -64,7 +64,7 @@ https://weekly.example.com/auth/apple/callback
 
 ```bash
 docker compose up -d --build
-docker compose exec app pnpm holiday:import 2026
+docker compose exec app pnpm holiday:import <year>
 ```
 
 Compose 只绑定 `127.0.0.1:3000`。Nginx 示例：
@@ -78,7 +78,7 @@ location / {
 }
 ```
 
-数据库和备份分别挂载到 `runtime/data`、`runtime/backups`。每天北京时间 03:00 执行 SQLite 在线备份，保留 30 天。
+数据和备份分别挂载到 `runtime/data`、`runtime/backups`。每天北京时间 03:00 创建包含 SQLite 与上传图片的完整备份包，保留 30 天。
 
 手动备份：
 
@@ -86,12 +86,15 @@ location / {
 docker compose exec app pnpm db:backup
 ```
 
-恢复时先停止服务，并保留当前数据库：
+恢复时先停止服务，并保留当前数据目录：
 
 ```bash
 docker compose stop app
 cp runtime/data/zhoubao.sqlite runtime/data/zhoubao.before-restore.sqlite
-cp runtime/backups/zhoubao-<timestamp>.sqlite runtime/data/zhoubao.sqlite
+cp runtime/backups/zhoubao-<timestamp>/zhoubao.sqlite runtime/data/zhoubao.sqlite
+rm -rf runtime/data/uploads.before-restore
+mv runtime/data/uploads runtime/data/uploads.before-restore
+cp -r runtime/backups/zhoubao-<timestamp>/uploads runtime/data/uploads
 docker compose start app
 ```
 
@@ -100,7 +103,7 @@ docker compose start app
 年度文件位于 `data/holidays/cn/<year>.json`，只保存法定节假日和调休上班覆盖项；普通周末由应用推导。
 
 ```bash
-pnpm holiday:import 2026
+pnpm holiday:import <year>
 ```
 
 新增年度文件时必须附国务院通知的 `sourceUrl`，导入脚本会验证年份、日期和类型。2026 年数据来源为国务院办公厅国办发明电〔2025〕7号。
@@ -109,6 +112,8 @@ pnpm holiday:import 2026
 
 ```bash
 pnpm typecheck
+pnpm lint
+pnpm format:check
 pnpm test
 pnpm build
 ```
