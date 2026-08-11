@@ -14,8 +14,66 @@ export const sectionHints = {
   other: '补充重要信息、会议结论与待跟进事项'
 } as const;
 
-export function Markdown({ content, className = '' }: { content: string; className?: string }) {
+const markdownImagePattern = /!\[[^\]]*\]\((?:\\.|[^)])*\)/g;
+
+export function stripMarkdownImages(content: string) {
+  return content.replace(markdownImagePattern, '').replace(/<img\b[^>]*>/gi, '');
+}
+
+export function attachmentImageWidth(content: string, attachmentId: string) {
+  const source = `/api/attachments/${attachmentId}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(`${source}(?:#w=(\\d{1,3}))?`));
+  if (!match) return null;
+  return Math.min(100, Math.max(25, Number(match[1] ?? 70)));
+}
+
+export function setAttachmentImageWidth(content: string, attachmentId: string, width: number) {
+  const source = `/api/attachments/${attachmentId}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const clamped = Math.min(100, Math.max(25, Math.round(width)));
+  return content.replace(
+    new RegExp(`(!\\[[^\\]]*\\]\\(${source})(?:#w=\\d{1,3})?(\\))`, 'g'),
+    `$1#w=${clamped}$2`
+  );
+}
+
+function prepareMarkdownHtml(content: string, hideImages: boolean, sizeImages: boolean) {
   const html = DOMPurify.sanitize(marked.parse(content || '暂无内容', { async: false }) as string);
+  if ((!hideImages && !sizeImages) || typeof DOMParser === 'undefined') return html;
+  const document = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+  const root = document.body.firstElementChild!;
+  root.querySelectorAll('img').forEach((image) => {
+    if (hideImages) {
+      image.remove();
+      return;
+    }
+    const match = image.getAttribute('src')?.match(/#w=(\d{1,3})$/);
+    const width = Math.min(100, Math.max(25, Number(match?.[1] ?? 70)));
+    image.classList.add('detail-sized-image');
+    image.setAttribute('style', `width:${width}%;height:auto`);
+    image.setAttribute('title', '双击全屏查看');
+  });
+  if (hideImages) {
+    root.querySelectorAll('p').forEach((paragraph) => {
+      if (!paragraph.textContent?.trim() && !paragraph.children.length) paragraph.remove();
+    });
+    if (!root.textContent?.trim() && !root.children.length)
+      root.innerHTML = '<p class="markdown-empty">详见周报详情</p>';
+  }
+  return root.innerHTML;
+}
+
+export function Markdown({
+  content,
+  className = '',
+  hideImages = false,
+  sizeImages = false
+}: {
+  content: string;
+  className?: string;
+  hideImages?: boolean;
+  sizeImages?: boolean;
+}) {
+  const html = prepareMarkdownHtml(content, hideImages, sizeImages);
   return <div className={`markdown ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 

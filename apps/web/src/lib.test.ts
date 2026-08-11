@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, isoWeekForDate, weekRangeForDate, weeksInIsoYear } from './lib';
+import {
+  addDays,
+  attachmentImageWidth,
+  isoWeekForDate,
+  setAttachmentImageWidth,
+  stripMarkdownImages,
+  weekRangeForDate,
+  weeksInIsoYear
+} from './lib';
 
 describe('weekly date helpers', () => {
   it('handles ISO week-year boundaries', () => {
@@ -11,5 +19,15 @@ describe('weekly date helpers', () => {
   });
   it('adds days across month boundaries', () => {
     expect(addDays('2026-08-31', 1)).toBe('2026-09-01');
+  });
+  it('removes image markup from report summaries', () => {
+    expect(stripMarkdownImages('完成登录。\n\n![示意图](/api/attachments/demo)')).toBe('完成登录。\n\n');
+  });
+  it('persists a bounded display width in attachment image markup', () => {
+    const content = '![示意图](/api/attachments/abc)';
+    const resized = setAttachmentImageWidth(content, 'abc', 55);
+    expect(resized).toBe('![示意图](/api/attachments/abc#w=55)');
+    expect(attachmentImageWidth(resized, 'abc')).toBe(55);
+    expect(attachmentImageWidth(content, 'abc')).toBe(70);
   });
 });

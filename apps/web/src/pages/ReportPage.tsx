@@ -42,8 +42,11 @@ import {
   formatDate,
   isoWeekForDate,
   Markdown,
+  attachmentImageWidth,
   sectionHints,
   sectionLabels,
+  setAttachmentImageWidth,
+  stripMarkdownImages,
   todayShanghai,
   weeksInIsoYear
 } from '../lib';
@@ -240,7 +243,9 @@ function buildReportText(report: WeeklyReport, projects: Project[]) {
         const meta = [project, progressLabels[item.progress], item.note && `备注：${item.note}`]
           .filter(Boolean)
           .join(' · ');
-        lines.push(`${index + 1}. ${summarizeMarkdown(item.contentMd)}${meta ? `（${meta}）` : ''}`);
+        const summary =
+          summarizeMarkdown(item.contentMd) || (item.contentMd.trim() ? '详见周报详情' : '暂无内容');
+        lines.push(`${index + 1}. ${summary}${meta ? `（${meta}）` : ''}`);
       });
     lines.push('');
   }
@@ -268,7 +273,7 @@ function PrintableReport({ report, projects }: { report: WeeklyReport; projects:
                     <span>{progressLabels[item.progress]}</span>
                     {item.occurredOn && <span>{item.occurredOn}</span>}
                   </div>
-                  <Markdown content={item.contentMd} />
+                  <Markdown content={item.contentMd} hideImages />
                   {item.note && <p className="print-note">备注：{item.note}</p>}
                 </div>
               </article>
@@ -394,9 +399,7 @@ function ReportOverview({ report }: { report: WeeklyReport }) {
   return (
     <section className="briefing-summary report-overview">
       <div className="briefing-summary-copy">
-        <span>本周工作概览</span>
-        <h2>成果、计划与风险一屏呈现</h2>
-        <p>聚焦关键交付和待协调事项，便于快速浏览与会议汇报。</p>
+        <h2>本周工作概览</h2>
       </div>
       <dl className="briefing-metrics">
         <div>
@@ -608,8 +611,7 @@ function ProjectReportGroup({
 }
 
 function summarizeMarkdown(content: string) {
-  return content
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '[图片] $1')
+  return stripMarkdownImages(content)
     .replace(/[#*_`>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -644,6 +646,7 @@ function ReportItemRow({
   const [inlineEditing, setInlineEditing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailEditing, setDetailEditing] = useState(false);
+  const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [status, setStatus] = useState<'saved' | 'saving' | 'error' | 'conflict'>('saved');
   const [conflictCurrent, setConflictCurrent] = useState<ReportItem | null>(null);
@@ -787,7 +790,7 @@ function ReportItemRow({
     setDetailEditing(false);
     setDetailsOpen(true);
   };
-  const displayContent = summarizeMarkdown(content) || '点击填写内容';
+  const displayContent = summarizeMarkdown(content) || (content.trim() ? '点击打开详情' : '点击填写内容');
 
   return (
     <article
@@ -919,7 +922,10 @@ function ReportItemRow({
         open={detailsOpen}
         onOpenChange={(open) => {
           setDetailsOpen(open);
-          if (!open) setDetailEditing(false);
+          if (!open) {
+            setDetailEditing(false);
+            setFullscreenImage(null);
+          }
         }}
         title={`周报详情 · 第 ${sequence} 条`}
         description={
@@ -1035,8 +1041,17 @@ function ReportItemRow({
               />
             </div>
           ) : (
-            <div className="detail-preview detail-preview-only">
-              <Markdown content={content} />
+            <div
+              className="detail-preview detail-preview-only"
+              onDoubleClick={(event) => {
+                if (!(event.target instanceof HTMLImageElement)) return;
+                setFullscreenImage({
+                  src: event.target.currentSrc || event.target.src,
+                  alt: event.target.alt || '周报图片'
+                });
+              }}
+            >
+              <Markdown content={content} sizeImages />
             </div>
           )}
           <div className="attachment-panel">
@@ -1056,6 +1071,26 @@ function ReportItemRow({
                       {attachment.originalName}
                     </a>
                     <span>{Math.max(1, Math.round(attachment.sizeBytes / 1024))} KB</span>
+                    {attachmentImageWidth(content, attachment.id) !== null ? (
+                      <label className="attachment-size-control">
+                        <span>宽度 {attachmentImageWidth(content, attachment.id)}%</span>
+                        <input
+                          type="range"
+                          min="25"
+                          max="100"
+                          step="5"
+                          value={attachmentImageWidth(content, attachment.id) ?? 70}
+                          onChange={(event) =>
+                            setContent((current) =>
+                              setAttachmentImageWidth(current, attachment.id, Number(event.target.value))
+                            )
+                          }
+                          aria-label={`调整图片 ${attachment.originalName} 的显示宽度`}
+                        />
+                      </label>
+                    ) : (
+                      <span className="attachment-unlinked">未插入正文</span>
+                    )}
                     <button
                       className="icon-button danger"
                       aria-label={`删除附件 ${attachment.originalName}`}
@@ -1074,6 +1109,19 @@ function ReportItemRow({
               <div className="form-error">删除附件失败：{removeAttachment.error.message}</div>
             )}
           </div>
+        </div>
+      </Modal>
+      <Modal
+        open={Boolean(fullscreenImage)}
+        onOpenChange={(open) => {
+          if (!open) setFullscreenImage(null);
+        }}
+        title={fullscreenImage?.alt || '图片预览'}
+        description="按 Esc 或右上角关闭全屏预览。"
+        fullscreen
+      >
+        <div className="image-lightbox">
+          {fullscreenImage && <img src={fullscreenImage.src} alt={fullscreenImage.alt} />}
         </div>
       </Modal>
       <Modal

@@ -11,7 +11,8 @@ export function Modal({
   title,
   description,
   children,
-  wide = false
+  wide = false,
+  fullscreen = false
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -19,12 +20,15 @@ export function Modal({
   description?: string;
   children: ReactNode;
   wide?: boolean;
+  fullscreen?: boolean;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className={`dialog-content ${wide ? 'dialog-wide' : ''}`}>
+        <Dialog.Content
+          className={`dialog-content ${wide ? 'dialog-wide' : ''} ${fullscreen ? 'dialog-fullscreen' : ''}`}
+        >
           <div className="dialog-heading">
             <div>
               <Dialog.Title>{title}</Dialog.Title>

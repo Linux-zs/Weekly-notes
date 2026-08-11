@@ -222,7 +222,7 @@ export function SearchPage() {
                     </span>
                   ))}
                 </div>
-                <Markdown content={result.contentMd} />
+                <Markdown content={result.contentMd} hideImages />
                 <div className="result-foot">
                   <Link to={`/week/${result.weekYear}/${result.weekNumber}`}>
                     打开这一周
