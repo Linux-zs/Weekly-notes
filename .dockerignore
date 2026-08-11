@@ -3,5 +3,8 @@ node_modules
 **/dist
 .git
 .env
+.learnings
+*.tar
+runtime
 data/*.sqlite*
 data/backups
