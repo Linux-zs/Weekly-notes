@@ -28,7 +28,7 @@ pnpm build
 pnpm start
 ```
 
-生产构建默认监听 `http://127.0.0.1:3000`。
+应用进程监听容器内的 `0.0.0.0:3000`。
 
 ## 生产配置
 
@@ -63,11 +63,12 @@ https://weekly.example.com/auth/apple/callback
 ## Docker 与反向代理
 
 ```bash
-docker compose up -d --build
+docker build -t weekly-notes:latest .
+docker compose up -d
 docker compose exec app pnpm holiday:import <year>
 ```
 
-Compose 只绑定 `127.0.0.1:3000`。Nginx 示例：
+Compose 只将端口发布到宿主机的 `127.0.0.1:3000`，生产流量应通过 Nginx 或 Caddy 终止 HTTPS 后转发。Nginx 示例：
 
 ```nginx
 location / {

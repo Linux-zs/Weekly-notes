@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: weekly-notes:latest
     restart: unless-stopped
     env_file: .env
     environment:
