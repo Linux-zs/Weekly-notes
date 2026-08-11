@@ -9,6 +9,7 @@ import {
   HardDrive,
   Link2,
   Palette,
+  Plus,
   RefreshCcw,
   ShieldCheck,
   Tag as TagIcon,
@@ -131,6 +132,7 @@ function SettingsContent({
   const [removeMember, setRemoveMember] = useState<SettingsData['members'][number] | null>(null);
   const [unlinkProvider, setUnlinkProvider] = useState<string | null>(null);
   const [editTag, setEditTag] = useState<Tag | null>(null);
+  const [createTagOpen, setCreateTagOpen] = useState(false);
   const [deleteTagTarget, setDeleteTagTarget] = useState<Tag | null>(null);
   const [compact, setCompact] = useState(() => localStorage.getItem('weekly-report:compact') === 'true');
   useEffect(() => {
@@ -187,11 +189,15 @@ function SettingsContent({
     }
   });
   const backup = useMutation({
-    mutationFn: () => api('/api/settings/backup', { method: 'POST' }),
+    mutationFn: () => api<{ name: string; createdAt: string }>('/api/settings/backup', { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] })
   });
   const holiday = useMutation({
-    mutationFn: () => api(`/api/settings/holidays/${holidayYear}/import`, { method: 'POST' }),
+    mutationFn: () =>
+      api<{ year: number; count: number; sourceUrl: string }>(
+        `/api/settings/holidays/${holidayYear}/import`,
+        { method: 'POST' }
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
       qc.invalidateQueries({ queryKey: ['report'] });
@@ -219,6 +225,14 @@ function SettingsContent({
       setEditTag(null);
       qc.invalidateQueries({ queryKey: ['tags'] });
       qc.invalidateQueries({ queryKey: ['report'] });
+    }
+  });
+  const createTag = useMutation({
+    mutationFn: ({ name, color }: { name: string; color: string }) =>
+      api<Tag>('/api/tags', { method: 'POST', body: JSON.stringify({ name, color }) }),
+    onSuccess: () => {
+      setCreateTagOpen(false);
+      qc.invalidateQueries({ queryKey: ['tags'] });
     }
   });
   const applyCompact = (value: boolean) => {
@@ -346,7 +360,7 @@ function SettingsContent({
             </label>
             <div className="security-note">
               <CheckCircle2 size={16} />
-              公网注册已关闭，身份不会按邮箱自动合并。
+              开放注册已启用；跨平台身份不会仅凭邮箱自动合并。
             </div>
             {workspace.error && <div className="form-error">{workspace.error.message}</div>}
             <button className="button secondary" disabled={workspace.isPending || settings.role !== 'owner'}>
@@ -535,7 +549,26 @@ function SettingsContent({
             </div>
           </div>
           {backup.error && <div className="form-error">{backup.error.message}</div>}
-          <button className="button" onClick={() => backup.mutate()} disabled={backup.isPending}>
+          {backup.data && !backup.isPending && (
+            <div className="operation-result" role="status" aria-live="polite">
+              <CheckCircle2 size={17} />
+              <div>
+                <strong>完整备份已创建</strong>
+                <span>{backup.data.name} · Docker Compose 默认保存在宿主机 runtime/backups</span>
+              </div>
+            </div>
+          )}
+          <p className="storage-location">
+            每份备份包含数据库、上传文件和校验清单；容器目录为 <code>/app/backups</code>。
+          </p>
+          <button
+            className="button"
+            onClick={() => {
+              backup.reset();
+              backup.mutate();
+            }}
+            disabled={backup.isPending}
+          >
             {backup.isPending ? '正在备份…' : '立即创建完整备份'}
           </button>
         </section>
@@ -563,13 +596,25 @@ function SettingsContent({
             />
             <button
               className="button secondary"
-              onClick={() => holiday.mutate()}
+              onClick={() => {
+                holiday.reset();
+                holiday.mutate();
+              }}
               disabled={holiday.isPending}
             >
               {holiday.isPending ? '导入中…' : '导入年度数据'}
             </button>
           </div>
           {holiday.error && <div className="form-error">{holiday.error.message}</div>}
+          {holiday.data && !holiday.isPending && (
+            <div className="operation-result compact-result" role="status" aria-live="polite">
+              <CheckCircle2 size={16} />
+              <div>
+                <strong>{holiday.data.year} 年数据已导入</strong>
+                <span>已写入 {holiday.data.count} 条法定节假日和调休覆盖项。</span>
+              </div>
+            </div>
+          )}
         </section>
         <section className="settings-card vertical settings-tags">
           <div className="panel-heading">
@@ -580,6 +625,16 @@ function SettingsContent({
               </h2>
               <p>编辑或清理周报条目使用的标签。</p>
             </div>
+            <button
+              className="button secondary compact-button"
+              onClick={() => {
+                createTag.reset();
+                setCreateTagOpen(true);
+              }}
+            >
+              <Plus size={14} />
+              新建标签
+            </button>
           </div>
           <div className="tag-management">
             {tags.length ? (
@@ -601,7 +656,7 @@ function SettingsContent({
                 </div>
               ))
             ) : (
-              <span className="muted">尚未创建标签，可在编辑周报条目时创建。</span>
+              <span className="muted">尚未创建标签，点击右上角“新建标签”开始使用。</span>
             )}
           </div>
         </section>
@@ -611,7 +666,7 @@ function SettingsContent({
           </div>
           <div className="settings-body">
             <h2>界面密度</h2>
-            <p>紧凑模式会缩小列表行高，更适合项目和条目较多的汇报。</p>
+            <p>紧凑模式会同步收紧页面留白、卡片间距与列表行高，适合信息较多的汇报。</p>
             <label className="switch-row">
               <input
                 type="checkbox"
@@ -655,6 +710,17 @@ function SettingsContent({
           onSave={(name, color) => saveTag.mutate({ id: editTag.id, name, color })}
           pending={saveTag.isPending}
           error={saveTag.error?.message}
+        />
+      )}{' '}
+      {createTagOpen && (
+        <TagEditor
+          onClose={() => {
+            setCreateTagOpen(false);
+            createTag.reset();
+          }}
+          onSave={(name, color) => createTag.mutate({ name, color })}
+          pending={createTag.isPending}
+          error={createTag.error?.message}
         />
       )}{' '}
       {deleteTagTarget && (
@@ -736,16 +802,16 @@ function TagEditor({
   pending,
   error
 }: {
-  tag: Tag;
+  tag?: Tag;
   onClose: () => void;
   onSave: (name: string, color: string) => void;
   pending: boolean;
   error?: string;
 }) {
-  const [name, setName] = useState(tag.name);
-  const [color, setColor] = useState(tag.color);
+  const [name, setName] = useState(tag?.name ?? '');
+  const [color, setColor] = useState(tag?.color ?? tagColors[0]);
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()} title="编辑标签">
+    <Modal open onOpenChange={(open) => !open && onClose()} title={tag ? '编辑标签' : '新建标签'}>
       <form
         className="dialog-form"
         onSubmit={(event) => {
@@ -784,7 +850,7 @@ function TagEditor({
             取消
           </button>
           <button className="button" disabled={pending}>
-            {pending ? '保存中…' : '保存标签'}
+            {pending ? (tag ? '保存中…' : '创建中…') : tag ? '保存标签' : '创建标签'}
           </button>
         </div>
       </form>

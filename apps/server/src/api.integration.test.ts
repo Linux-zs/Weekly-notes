@@ -161,8 +161,13 @@ describe('authenticated weekly report workflow', () => {
     const attachment = await app.inject({ method: 'GET', url: uploaded.json().url, headers: { cookie } });
     expect(attachment.statusCode).toBe(200);
     expect(attachment.headers['content-type']).toContain('image/png');
-    const { createBackup } = await import('./services/backup.js');
-    const backup = await createBackup();
+    const backupResponse = await app.inject({
+      method: 'POST',
+      url: '/api/settings/backup',
+      headers: headers()
+    });
+    expect(backupResponse.statusCode).toBe(200);
+    const backup = path.join(testRoot, 'backups', backupResponse.json().name);
     expect(fs.existsSync(path.join(backup, 'zhoubao.sqlite'))).toBe(true);
     expect(fs.existsSync(path.join(backup, 'manifest.json'))).toBe(true);
     expect(
@@ -170,6 +175,13 @@ describe('authenticated weekly report workflow', () => {
         .readdirSync(path.join(backup, 'uploads'), { recursive: true })
         .some((entry) => String(entry).endsWith('.png'))
     ).toBe(true);
+    const holidayImport = await app.inject({
+      method: 'POST',
+      url: '/api/settings/holidays/2026/import',
+      headers: headers()
+    });
+    expect(holidayImport.statusCode).toBe(200);
+    expect(holidayImport.json()).toMatchObject({ year: 2026, count: 39 });
     const attachmentList = await app.inject({
       method: 'GET',
       url: `/api/report-items/${item.json().id}/attachments`,

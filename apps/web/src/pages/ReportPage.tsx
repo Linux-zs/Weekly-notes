@@ -30,6 +30,7 @@ import {
   Pencil,
   Plus,
   RefreshCcw,
+  Tags,
   Trash2
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -851,6 +852,17 @@ function ReportItemRow({
           {(status === 'error' || status === 'conflict') && (
             <span className={`save-status ${status}`}>{status === 'conflict' ? '冲突' : '保存失败'}</span>
           )}
+          <button
+            className="icon-button"
+            onClick={() => {
+              setDetailEditing(true);
+              setDetailsOpen(true);
+            }}
+            aria-label={`编辑第 ${sequence} 条的标签`}
+            title="编辑标签"
+          >
+            <Tags size={14} />
+          </button>
           <button
             className="icon-button danger"
             onClick={() => {
