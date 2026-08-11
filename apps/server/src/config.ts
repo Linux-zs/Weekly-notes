@@ -9,6 +9,7 @@ const envSchema = z.object({
   DATABASE_PATH: z.string().default('./data/zhoubao.sqlite'),
   BACKUP_DIR: z.string().default('./data/backups'),
   UPLOAD_DIR: z.string().default('./data/uploads'),
+  HOLIDAY_DATA_DIR: z.string().default('./data/holidays'),
   SESSION_COOKIE_NAME: z.string().default('zhoubao_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   OWNER_BOOTSTRAP_EMAIL: z.string().email().default('owner@example.com'),
@@ -40,5 +41,6 @@ export const config = {
   appleEnabled: parsed.APPLE_ENABLED === 'true',
   databasePath: path.resolve(workspaceRoot, parsed.DATABASE_PATH),
   backupDir: path.resolve(workspaceRoot, parsed.BACKUP_DIR),
-  uploadDir: path.resolve(workspaceRoot, parsed.UPLOAD_DIR)
+  uploadDir: path.resolve(workspaceRoot, parsed.UPLOAD_DIR),
+  holidayDataDir: path.resolve(workspaceRoot, parsed.HOLIDAY_DATA_DIR)
 };

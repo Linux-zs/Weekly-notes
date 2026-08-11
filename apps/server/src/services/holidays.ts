@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { workspaceRoot } from '../config.js';
+import { config } from '../config.js';
 import { sqlite } from '../db/index.js';
 
 const holidaySchema = z.object({
@@ -18,7 +18,7 @@ const holidaySchema = z.object({
 });
 
 export function importHolidayYear(year: number) {
-  const file = path.resolve(workspaceRoot, `data/holidays/cn/${year}.json`);
+  const file = path.resolve(config.holidayDataDir, `cn/${year}.json`);
   if (!fs.existsSync(file)) throw new Error(`${year} 年节假日数据文件不存在`);
   const data = holidaySchema.parse(JSON.parse(fs.readFileSync(file, 'utf8')));
   if (data.year !== year) throw new Error('文件年份与数据年份不一致');

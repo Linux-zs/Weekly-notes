@@ -8,6 +8,7 @@ services:
       DATABASE_PATH: /app/data/zhoubao.sqlite
       BACKUP_DIR: /app/backups
       UPLOAD_DIR: /app/data/uploads
+      HOLIDAY_DATA_DIR: /app/resources/holidays
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

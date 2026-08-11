@@ -13,13 +13,14 @@ RUN pnpm install --frozen-lockfile --registry=${NPM_REGISTRY}
 COPY . .
 RUN pnpm build
 
-FROM base AS runtime
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/apps/server ./apps/server
 COPY --from=build /app/apps/web/dist ./apps/web/dist
-COPY --from=build /app/data/holidays ./data/holidays
+COPY --from=build /app/data/holidays ./resources/holidays
 EXPOSE 3000
 CMD ["node", "apps/server/dist/index.js"]

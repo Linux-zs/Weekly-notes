@@ -65,7 +65,7 @@ https://weekly.example.com/auth/apple/callback
 ```bash
 docker build -t weekly-notes:latest .
 docker compose up -d
-docker compose exec app pnpm holiday:import <year>
+docker compose exec -T app node apps/server/dist/scripts/import-holidays.js <year>
 ```
 
 Compose 只将端口发布到宿主机的 `127.0.0.1:3000`，生产流量应通过 Nginx 或 Caddy 终止 HTTPS 后转发。Nginx 示例：
@@ -84,7 +84,7 @@ location / {
 手动备份：
 
 ```bash
-docker compose exec app pnpm db:backup
+docker compose exec -T app node apps/server/dist/scripts/backup.js
 ```
 
 恢复时先停止服务，并保留当前数据目录：
@@ -101,7 +101,7 @@ docker compose start app
 
 ## 节假日数据
 
-年度文件位于 `data/holidays/cn/<year>.json`，只保存法定节假日和调休上班覆盖项；普通周末由应用推导。
+源码中的年度文件位于 `data/holidays/cn/<year>.json`，生产镜像会将其复制到不受持久化数据卷影响的只读资源目录。文件只保存法定节假日和调休上班覆盖项；普通周末由应用推导。
 
 ```bash
 pnpm holiday:import <year>
