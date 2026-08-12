@@ -3,14 +3,11 @@ import type { Tag } from '@zhoubao/shared';
 import {
   CheckCircle2,
   Camera,
-  CloudDownload,
   Database,
   Download,
-  HardDrive,
   Link2,
   Palette,
   Plus,
-  RefreshCcw,
   ShieldCheck,
   Tag as TagIcon,
   Trash2,
@@ -42,14 +39,6 @@ type SettingsData = {
   }>;
   invitations: Array<{ id: string; email: string; role: string; expiresAt: string; createdAt: string }>;
   role: string;
-  status: {
-    databaseBytes: number;
-    uploads: { files: number; bytes: number };
-    backups: Array<{ name: string; createdAt: string; files: number; bytes: number }>;
-    holidayYears: Array<{ year: number; dayCount: number; sourceUrl: string | null }>;
-    backupSchedule: string;
-    retentionDays: number;
-  };
 };
 type Account = {
   id: string;
@@ -59,12 +48,6 @@ type Account = {
   lastLoginAt: string | null;
 };
 const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
-const formatBytes = (bytes: number) =>
-  bytes < 1024
-    ? `${bytes} B`
-    : bytes < 1024 * 1024
-      ? `${(bytes / 1024).toFixed(1)} KB`
-      : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 export function SettingsPage() {
   const qc = useQueryClient();
@@ -127,7 +110,6 @@ function SettingsContent({
   const [timezone, setTimezone] = useState(settings.profile.timezone);
   const avatarInput = useRef<HTMLInputElement>(null);
   const [workspaceName, setWorkspaceName] = useState(settings.workspace.name);
-  const [holidayYear, setHolidayYear] = useState(new Date().getFullYear());
   const [inviteEmail, setInviteEmail] = useState('');
   const [removeMember, setRemoveMember] = useState<SettingsData['members'][number] | null>(null);
   const [unlinkProvider, setUnlinkProvider] = useState<string | null>(null);
@@ -188,21 +170,6 @@ function SettingsContent({
       qc.invalidateQueries({ queryKey: ['settings'] });
     }
   });
-  const backup = useMutation({
-    mutationFn: () => api<{ name: string; createdAt: string }>('/api/settings/backup', { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] })
-  });
-  const holiday = useMutation({
-    mutationFn: () =>
-      api<{ year: number; count: number; sourceUrl: string }>(
-        `/api/settings/holidays/${holidayYear}/import`,
-        { method: 'POST' }
-      ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings'] });
-      qc.invalidateQueries({ queryKey: ['report'] });
-    }
-  });
   const unlink = useMutation({
     mutationFn: (provider: string) => api(`/api/auth/accounts/${provider}`, { method: 'DELETE' }),
     onSuccess: () => {
@@ -240,7 +207,6 @@ function SettingsContent({
     localStorage.setItem('weekly-report:compact', String(value));
     document.documentElement.classList.toggle('compact-ui', value);
   };
-  const lastBackup = settings.status.backups[0];
   return (
     <div className="page">
       <div className="page-heading">
@@ -515,106 +481,15 @@ function SettingsContent({
             <div>
               <h2>
                 <Database size={18} />
-                数据与备份
+                数据导出
               </h2>
-              <p>
-                每日 {settings.status.backupSchedule} 自动生成完整数据包，保留 {settings.status.retentionDays}{' '}
-                天。
-              </p>
+              <p>下载当前空间内的周报、项目、标签和个人资料。</p>
             </div>
             <a className="button secondary" href="/api/settings/export">
               <Download size={15} />
-              导出 JSON
+              导出当前空间 JSON
             </a>
           </div>
-          <div className="storage-metrics">
-            <div>
-              <HardDrive />
-              <span>数据库</span>
-              <strong>{formatBytes(settings.status.databaseBytes)}</strong>
-            </div>
-            <div>
-              <CloudDownload />
-              <span>上传文件</span>
-              <strong>
-                {settings.status.uploads.files} 个 · {formatBytes(settings.status.uploads.bytes)}
-              </strong>
-            </div>
-            <div>
-              <RefreshCcw />
-              <span>最近备份</span>
-              <strong>
-                {lastBackup ? new Date(lastBackup.createdAt).toLocaleString('zh-CN') : '尚无备份'}
-              </strong>
-            </div>
-          </div>
-          {backup.error && <div className="form-error">{backup.error.message}</div>}
-          {backup.data && !backup.isPending && (
-            <div className="operation-result" role="status" aria-live="polite">
-              <CheckCircle2 size={17} />
-              <div>
-                <strong>完整备份已创建</strong>
-                <span>{backup.data.name} · Docker Compose 默认保存在宿主机 runtime/backups</span>
-              </div>
-            </div>
-          )}
-          <p className="storage-location">
-            每份备份包含数据库、上传文件和校验清单；容器目录为 <code>/app/backups</code>。
-          </p>
-          <button
-            className="button"
-            onClick={() => {
-              backup.reset();
-              backup.mutate();
-            }}
-            disabled={backup.isPending}
-          >
-            {backup.isPending ? '正在备份…' : '立即创建完整备份'}
-          </button>
-        </section>
-        <section className="settings-card vertical settings-calendar">
-          <div className="panel-heading">
-            <div>
-              <h2>节假日数据</h2>
-              <p>导入仓库内已有的年度法定节假日与调休文件。</p>
-            </div>
-          </div>
-          <div className="holiday-years">
-            {settings.status.holidayYears.map((item) => (
-              <span key={item.year}>
-                {item.year} · {item.dayCount} 条
-              </span>
-            ))}
-          </div>
-          <div className="inline-setting">
-            <input
-              type="number"
-              min="2000"
-              max="2200"
-              value={holidayYear}
-              onChange={(event) => setHolidayYear(Number(event.target.value))}
-            />
-            <button
-              className="button secondary"
-              onClick={() => {
-                holiday.reset();
-                holiday.mutate();
-              }}
-              disabled={holiday.isPending}
-            >
-              {holiday.isPending ? '导入中…' : '导入年度数据'}
-            </button>
-          </div>
-          {holiday.error && <div className="form-error">{holiday.error.message}</div>}
-          {holiday.data && !holiday.isPending && (
-            <div className="operation-result compact-result" role="status" aria-live="polite">
-              <CheckCircle2 size={16} />
-              <div>
-                <strong>{holiday.data.year} 年数据已导入</strong>
-                <span>已写入 {holiday.data.count} 条法定节假日和调休覆盖项。</span>
-              </div>
-            </div>
-          )}
         </section>
         <section className="settings-card vertical settings-tags">
           <div className="panel-heading">

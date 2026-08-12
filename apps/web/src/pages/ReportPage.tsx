@@ -30,7 +30,6 @@ import {
   Pencil,
   Plus,
   RefreshCcw,
-  Tags,
   Trash2
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -53,9 +52,11 @@ import {
 
 const sections: ReportItemType[] = ['completed', 'next_plan'];
 const copySections: ReportItemType[] = ['completed', 'other', 'next_plan'];
+const projectColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 type User = { id: string; displayName: string; email: string | null; avatarUrl: string | null };
 type ReportWeekSummary = { year: number; weeks: Array<{ weekNumber: number; itemCount: number }> };
 type ProjectItemGroup = { key: string; project: Project | null; items: ReportItem[] };
+type ProjectDraft = { name: string; color: string };
 type ItemMeta = { progress: ReportItemProgress; note: string };
 const progressLabels: Record<ReportItemProgress, string> = {
   completed: '已完成',
@@ -108,6 +109,27 @@ export function ReportPage({ user }: { user: User }) {
       });
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report', year, week] });
+      qc.invalidateQueries({ queryKey: ['report-weeks', year] });
+    }
+  });
+  const createProject = useMutation({
+    mutationFn: async ({ type, draft }: { type: ReportItemType; draft: ProjectDraft }) => {
+      const project = await api<Project>('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify(draft)
+      });
+      let data = report.data!;
+      if (!data.id)
+        data = await api<WeeklyReport>(`/api/reports/${year}/${week}`, { method: 'PUT', body: '{}' });
+      await api(`/api/reports/${data.id}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ type, projectId: project.id, contentMd: '' })
+      });
+      return project;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['projects'] });
       qc.invalidateQueries({ queryKey: ['report', year, week] });
       qc.invalidateQueries({ queryKey: ['report-weeks', year] });
     }
@@ -193,6 +215,9 @@ export function ReportPage({ user }: { user: User }) {
       {addMutation.error && (
         <div className="page-action-error">添加条目失败：{addMutation.error.message}</div>
       )}
+      {createProject.error && (
+        <div className="page-action-error">新增项目失败：{createProject.error.message}</div>
+      )}
       <div className="report-sections report-sections-focused">
         <ReportSection
           key={activeType}
@@ -202,6 +227,8 @@ export function ReportPage({ user }: { user: User }) {
           report={data}
           projects={activeProjects}
           onAdd={(projectId) => addMutation.mutate({ type: activeType, projectId })}
+          onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
+          creatingProject={createProject.isPending}
           onPrevious={() => setActiveSection((index) => Math.max(0, index - 1))}
           onNext={() => setActiveSection((index) => Math.min(sections.length - 1, index + 1))}
           canPrevious={activeSection > 0}
@@ -216,6 +243,8 @@ export function ReportPage({ user }: { user: User }) {
             report={data}
             projects={activeProjects}
             onAdd={(projectId) => addMutation.mutate({ type: 'other', projectId })}
+            onCreateProject={(draft) => createProject.mutateAsync({ type: 'other', draft })}
+            creatingProject={createProject.isPending}
             index={activeSection}
             onPrevious={() => undefined}
             onNext={() => undefined}
@@ -399,6 +428,8 @@ function ReportSection({
   report,
   projects,
   onAdd,
+  onCreateProject,
+  creatingProject,
   index,
   onPrevious,
   onNext,
@@ -413,6 +444,8 @@ function ReportSection({
   report: WeeklyReport;
   projects: Project[];
   onAdd: (projectId: string | null) => void;
+  onCreateProject: (draft: ProjectDraft) => Promise<Project>;
+  creatingProject: boolean;
   index: number;
   onPrevious: () => void;
   onNext: () => void;
@@ -423,6 +456,9 @@ function ReportSection({
   supplementary?: boolean;
 }) {
   const qc = useQueryClient();
+  const [projectEditorOpen, setProjectEditorOpen] = useState(false);
+  const [projectDraft, setProjectDraft] = useState<ProjectDraft>({ name: '', color: projectColors[0] });
+  const [projectError, setProjectError] = useState('');
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -439,73 +475,145 @@ function ReportSection({
     reorder.mutate(arrayMove(items, old, next).map((item) => item.id));
   };
   const groups = groupItemsByProject(items, projects);
+  const openProjectEditor = () => {
+    setProjectDraft({ name: '', color: projectColors[projects.length % projectColors.length] });
+    setProjectError('');
+    setProjectEditorOpen(true);
+  };
+  const submitProject = async () => {
+    const name = projectDraft.name.trim();
+    if (!name) return setProjectError('请输入项目名称');
+    setProjectError('');
+    try {
+      await onCreateProject({ ...projectDraft, name });
+      setProjectEditorOpen(false);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : '新增项目失败');
+    }
+  };
   return (
-    <section
-      className={`report-section project-table-section${supplementary ? ' report-section-supplementary' : ''}`}
-      style={{ '--section-index': index } as React.CSSProperties}
-    >
-      <div className="section-heading">
-        <div>
-          <span className={`section-index section-${type}`}>
-            {supplementary ? '附' : String(index + 1).padStart(2, '0')}
-          </span>
+    <>
+      <section
+        className={`report-section project-table-section${supplementary ? ' report-section-supplementary' : ''}`}
+        style={{ '--section-index': index } as React.CSSProperties}
+      >
+        <div className="section-heading">
           <div>
-            <div className="section-title-line">
-              <h2>{sectionLabels[type]}</h2>
-              {!supplementary && (
-                <nav className="section-switcher" aria-label="切换周报分类">
-                  <button onClick={onPrevious} disabled={!canPrevious} aria-label="上一个分类">
-                    <ArrowLeft size={14} />
-                  </button>
-                  <span>
-                    {index + 1} / {sections.length}
-                  </span>
-                  <button onClick={onNext} disabled={!canNext} aria-label="下一个分类">
-                    <ArrowRight size={14} />
-                  </button>
-                </nav>
-              )}
+            <span className={`section-index section-${type}`}>
+              {supplementary ? '附' : String(index + 1).padStart(2, '0')}
+            </span>
+            <div>
+              <div className="section-title-line">
+                <h2>{sectionLabels[type]}</h2>
+                {!supplementary && (
+                  <nav className="section-switcher" aria-label="切换周报分类">
+                    <button onClick={onPrevious} disabled={!canPrevious} aria-label="上一个分类">
+                      <ArrowLeft size={14} />
+                    </button>
+                    <span>
+                      {index + 1} / {sections.length}
+                    </span>
+                    <button onClick={onNext} disabled={!canNext} aria-label="下一个分类">
+                      <ArrowRight size={14} />
+                    </button>
+                  </nav>
+                )}
+              </div>
+              <p>{sectionHints[type]}</p>
             </div>
-            <p>{sectionHints[type]}</p>
+          </div>
+          <div className="section-heading-actions">
+            {onCopy && (
+              <button className="button secondary compact-button" onClick={onCopy}>
+                {copied ? <Check size={15} /> : <Copy size={15} />}
+                {copied ? '已复制' : '复制汇报'}
+              </button>
+            )}
+            <button className="button ghost" onClick={openProjectEditor}>
+              <Plus size={17} />
+              新增项目
+            </button>
           </div>
         </div>
-        <div className="section-heading-actions">
-          {onCopy && (
-            <button className="button secondary compact-button" onClick={onCopy}>
-              {copied ? <Check size={15} /> : <Copy size={15} />}
-              {copied ? '已复制' : '复制汇报'}
-            </button>
-          )}
-          <button className="button ghost" onClick={() => onAdd(null)}>
-            <Plus size={17} />
-            添加
+        {reorder.error && <div className="page-action-error">排序保存失败：{reorder.error.message}</div>}
+        {items.length ? (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
+            <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+              <div className="project-report-groups">
+                {groups.map((group) => (
+                  <ProjectReportGroup
+                    key={group.key}
+                    group={group}
+                    report={report}
+                    projects={projects}
+                    onAdd={() => onAdd(group.project?.id ?? null)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        ) : (
+          <button className="section-empty" onClick={() => onAdd(null)}>
+            <Plus size={18} />
+            <span>添加一条{sectionLabels[type]}</span>
           </button>
-        </div>
-      </div>
-      {reorder.error && <div className="page-action-error">排序保存失败：{reorder.error.message}</div>}
-      {items.length ? (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
-          <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-            <div className="project-report-groups">
-              {groups.map((group) => (
-                <ProjectReportGroup
-                  key={group.key}
-                  group={group}
-                  report={report}
-                  projects={projects}
-                  onAdd={() => onAdd(group.project?.id ?? null)}
+        )}
+      </section>
+      <Modal
+        open={projectEditorOpen}
+        onOpenChange={(open) => !creatingProject && setProjectEditorOpen(open)}
+        title="新增项目"
+        description="创建项目后，会在当前栏目生成第一条空白周报。"
+      >
+        <form
+          className="dialog-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitProject();
+          }}
+        >
+          <label>
+            项目名称
+            <input
+              autoFocus
+              value={projectDraft.name}
+              onChange={(event) => setProjectDraft((draft) => ({ ...draft, name: event.target.value }))}
+              maxLength={80}
+              required
+            />
+          </label>
+          <fieldset>
+            <legend>标识颜色</legend>
+            <div className="color-picker">
+              {projectColors.map((color) => (
+                <button
+                  type="button"
+                  key={color}
+                  className={projectDraft.color === color ? 'selected' : ''}
+                  style={{ background: color }}
+                  onClick={() => setProjectDraft((draft) => ({ ...draft, color }))}
+                  aria-label={`选择颜色 ${color}`}
                 />
               ))}
             </div>
-          </SortableContext>
-        </DndContext>
-      ) : (
-        <button className="section-empty" onClick={() => onAdd(null)}>
-          <Plus size={18} />
-          <span>添加一条{sectionLabels[type]}</span>
-        </button>
-      )}
-    </section>
+          </fieldset>
+          {projectError && <div className="form-error">{projectError}</div>}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setProjectEditorOpen(false)}
+              disabled={creatingProject}
+            >
+              取消
+            </button>
+            <button className="button" disabled={creatingProject}>
+              {creatingProject ? '创建中…' : '创建项目'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </>
   );
 }
 
@@ -524,15 +632,34 @@ function ProjectReportGroup({
   const [renaming, setRenaming] = useState(false);
   const [projectName, setProjectName] = useState(group.project?.name ?? '');
   useEffect(() => setProjectName(group.project?.name ?? ''), [group.project?.id, group.project?.name]);
-  const renameProject = useMutation({
-    mutationFn: (name: string) =>
-      api(`/api/projects/${group.project!.id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] })
+  const saveProjectName = useMutation({
+    mutationFn: async (name: string) => {
+      if (group.project) {
+        await api(`/api/projects/${group.project.id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+        return;
+      }
+      const project = await api<Project>('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name, color: projectColors[projects.length % projectColors.length] })
+      });
+      await Promise.all(
+        group.items.map((item) =>
+          api(`/api/report-items/${item.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ projectId: project.id, expectedVersion: item.version })
+          })
+        )
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
+    }
   });
   const finishRename = () => {
     const name = projectName.trim();
     setRenaming(false);
-    if (group.project && name && name !== group.project.name) renameProject.mutate(name);
+    if (name && name !== group.project?.name) saveProjectName.mutate(name);
     else setProjectName(group.project?.name ?? '');
   };
   return (
@@ -540,7 +667,7 @@ function ProjectReportGroup({
       <div className="project-group-label">
         <i style={{ background: group.project?.color ?? '#98A2B3' }} />
         <div className="project-name-control">
-          {renaming && group.project ? (
+          {renaming ? (
             <input
               autoFocus
               value={projectName}
@@ -549,41 +676,35 @@ function ProjectReportGroup({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur();
                 if (event.key === 'Escape') {
-                  setProjectName(group.project!.name);
+                  setProjectName(group.project?.name ?? '');
                   setRenaming(false);
                 }
               }}
+              placeholder="输入项目名"
               aria-label="编辑项目名称"
             />
+          ) : group.project ? (
+            <button
+              className="project-name-display"
+              onDoubleClick={() => setRenaming(true)}
+              title="双击修改项目名称"
+            >
+              {group.project.name}
+            </button>
           ) : (
-            <>
-              {group.project ? (
-                <button
-                  className="project-name-display"
-                  onDoubleClick={() => setRenaming(true)}
-                  title="双击改名"
-                >
-                  {group.project.name}
-                </button>
-              ) : (
-                <strong>未归属</strong>
-              )}
-              {group.project && (
-                <button
-                  className="project-rename-button"
-                  onClick={() => setRenaming(true)}
-                  aria-label="编辑项目名称"
-                >
-                  <Pencil size={12} />
-                </button>
-              )}
-            </>
+            <button
+              className="project-name-display"
+              onDoubleClick={() => setRenaming(true)}
+              title="双击创建项目"
+            >
+              未归属
+            </button>
           )}
         </div>
         <span>{group.items.length} 条</span>
       </div>
-      {renameProject.error && (
-        <div className="page-action-error">项目改名失败：{renameProject.error.message}</div>
+      {saveProjectName.error && (
+        <div className="page-action-error">项目名称保存失败：{saveProjectName.error.message}</div>
       )}
       <div className="project-group-rows">
         {group.items.map((item, index) => (
@@ -852,17 +973,6 @@ function ReportItemRow({
           {(status === 'error' || status === 'conflict') && (
             <span className={`save-status ${status}`}>{status === 'conflict' ? '冲突' : '保存失败'}</span>
           )}
-          <button
-            className="icon-button"
-            onClick={() => {
-              setDetailEditing(true);
-              setDetailsOpen(true);
-            }}
-            aria-label={`编辑第 ${sequence} 条的标签`}
-            title="编辑标签"
-          >
-            <Tags size={14} />
-          </button>
           <button
             className="icon-button danger"
             onClick={() => {

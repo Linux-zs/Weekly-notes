@@ -6,43 +6,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { id, now, sqlite } from '../db/index.js';
 import { detectImage } from '../lib/image.js';
-import { createBackup } from '../services/backup.js';
-import { importHolidayYear } from '../services/holidays.js';
 import { requireUser } from '../types.js';
-
-function directoryStats(directory: string) {
-  if (!fs.existsSync(directory)) return { files: 0, bytes: 0 };
-  let files = 0,
-    bytes = 0;
-  const visit = (target: string) => {
-    for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
-      const child = path.join(target, entry.name);
-      if (entry.isDirectory()) visit(child);
-      else {
-        files++;
-        bytes += fs.statSync(child).size;
-      }
-    }
-  };
-  visit(directory);
-  return { files, bytes };
-}
-
-function backupEntries() {
-  if (!fs.existsSync(config.backupDir)) return [];
-  return fs
-    .readdirSync(config.backupDir, { withFileTypes: true })
-    .filter((entry) => entry.name.startsWith('zhoubao-'))
-    .map((entry) => {
-      const target = path.join(config.backupDir, entry.name);
-      const stats = entry.isDirectory()
-        ? directoryStats(target)
-        : { files: 1, bytes: fs.statSync(target).size };
-      return { name: entry.name, createdAt: fs.statSync(target).mtime.toISOString(), ...stats };
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 10);
-}
 
 function validateTimezone(value: string) {
   try {
@@ -95,28 +59,13 @@ export async function registerSettings(app: FastifyInstance) {
             )
             .all(user.workspaceId, now())
         : [];
-    const databaseBytes = fs.existsSync(config.databasePath) ? fs.statSync(config.databasePath).size : 0;
-    const uploads = directoryStats(config.uploadDir);
-    const holidayYears = sqlite
-      .prepare(
-        'SELECT source_year AS year,COUNT(*) AS dayCount,MAX(source_url) AS sourceUrl FROM calendar_days GROUP BY source_year ORDER BY source_year DESC'
-      )
-      .all();
     return {
       profile,
       workspace,
       workspaces,
       members,
       invitations,
-      role: user.role,
-      status: {
-        databaseBytes,
-        uploads,
-        backups: backupEntries(),
-        holidayYears,
-        backupSchedule: '03:00',
-        retentionDays: 30
-      }
+      role: user.role
     };
   });
   app.patch('/api/settings/profile', { preHandler: requireUser }, async (request) => {
@@ -281,23 +230,6 @@ export async function registerSettings(app: FastifyInstance) {
       .prepare('UPDATE sessions SET workspace_id=NULL WHERE user_id=? AND workspace_id=?')
       .run(memberId, user.workspaceId);
     return reply.code(204).send();
-  });
-  app.post('/api/settings/backup', { preHandler: requireUser }, async (request, reply) => {
-    if (request.currentUser!.role !== 'owner') return reply.code(403).send({ error: 'FORBIDDEN' });
-    const destination = await createBackup();
-    return { name: path.basename(destination), createdAt: fs.statSync(destination).mtime.toISOString() };
-  });
-  app.post('/api/settings/holidays/:year/import', { preHandler: requireUser }, async (request, reply) => {
-    if (request.currentUser!.role !== 'owner') return reply.code(403).send({ error: 'FORBIDDEN' });
-    const { year } = z.object({ year: z.coerce.number().int().min(2000).max(2200) }).parse(request.params);
-    try {
-      return importHolidayYear(year);
-    } catch (error) {
-      return reply.code(404).send({
-        error: 'HOLIDAY_FILE_NOT_FOUND',
-        message: error instanceof Error ? error.message : '节假日导入失败'
-      });
-    }
   });
   app.get('/api/settings/export', { preHandler: requireUser }, async (request, reply) => {
     const user = request.currentUser!;

@@ -166,8 +166,9 @@ describe('authenticated weekly report workflow', () => {
       url: '/api/settings/backup',
       headers: headers()
     });
-    expect(backupResponse.statusCode).toBe(200);
-    const backup = path.join(testRoot, 'backups', backupResponse.json().name);
+    expect(backupResponse.statusCode).toBe(404);
+    const { createBackup } = await import('./services/backup.js');
+    const backup = await createBackup();
     expect(fs.existsSync(path.join(backup, 'zhoubao.sqlite'))).toBe(true);
     expect(fs.existsSync(path.join(backup, 'manifest.json'))).toBe(true);
     expect(
@@ -180,8 +181,9 @@ describe('authenticated weekly report workflow', () => {
       url: '/api/settings/holidays/2026/import',
       headers: headers()
     });
-    expect(holidayImport.statusCode).toBe(200);
-    expect(holidayImport.json()).toMatchObject({ year: 2026, count: 39 });
+    expect(holidayImport.statusCode).toBe(404);
+    const { importHolidayYear } = await import('./services/holidays.js');
+    expect(importHolidayYear(2026)).toMatchObject({ year: 2026, count: 39 });
     const attachmentList = await app.inject({
       method: 'GET',
       url: `/api/report-items/${item.json().id}/attachments`,
@@ -258,6 +260,7 @@ describe('authenticated weekly report workflow', () => {
     const settings = await app.inject({ method: 'GET', url: '/api/settings', headers: headers() });
     expect(settings.statusCode).toBe(200);
     expect(settings.json().invitations).toHaveLength(1);
+    expect(settings.json()).not.toHaveProperty('status');
     const revoked = await app.inject({
       method: 'DELETE',
       url: `/api/settings/invitations/${invitation.json().id}`,
