@@ -217,6 +217,245 @@ describe('authenticated weekly report workflow', () => {
     expect(renamedTag.json()).toMatchObject({ name: '已验证', color: '#2F5597' });
   });
 
+  it('manages categories and moves report items transactionally', async () => {
+    const development = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(),
+      payload: { name: '开发' }
+    });
+    const operations = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(),
+      payload: { name: '运维' }
+    });
+    expect(development.statusCode).toBe(201);
+    expect(operations.statusCode).toBe(201);
+    const developmentId = development.json().id;
+    const operationsId = operations.json().id;
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(),
+      payload: { name: '开发' }
+    });
+    expect(duplicate.statusCode).toBe(409);
+
+    const firstProject = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: headers(),
+      payload: { name: '分类项目甲', color: '#345B9B' }
+    });
+    const secondProject = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: headers(),
+      payload: { name: '分类项目乙', color: '#28624A' }
+    });
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2026/34',
+      headers: headers(),
+      payload: {}
+    });
+    const reportId = report.json().id;
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/items`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        contentMd: '分类条目一',
+        projectId: firstProject.json().id,
+        categoryId: developmentId
+      }
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/items`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        contentMd: '分类条目二',
+        projectId: firstProject.json().id,
+        categoryId: developmentId
+      }
+    });
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toMatchObject({ categoryId: developmentId, version: 1 });
+
+    const moved = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        ids: [second.json().id, first.json().id],
+        move: {
+          itemId: first.json().id,
+          projectId: secondProject.json().id,
+          categoryId: operationsId,
+          expectedVersion: 1
+        }
+      }
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().movedItem).toMatchObject({
+      projectId: secondProject.json().id,
+      categoryId: operationsId,
+      version: 2
+    });
+    const incompleteOrder = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: { type: 'completed', ids: [first.json().id] }
+    });
+    expect(incompleteOrder.statusCode).toBe(400);
+
+    const archived = await app.inject({
+      method: 'PATCH',
+      url: `/api/categories/${operationsId}`,
+      headers: headers(),
+      payload: { archived: true }
+    });
+    expect(archived.statusCode).toBe(200);
+    const historicalUpdate = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${first.json().id}`,
+      headers: headers(),
+      payload: { note: '保留历史分类', categoryId: operationsId, expectedVersion: 2 }
+    });
+    expect(historicalUpdate.statusCode).toBe(200);
+    expect(historicalUpdate.json().categoryId).toBe(operationsId);
+    const assignArchived = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${second.json().id}`,
+      headers: headers(),
+      payload: { categoryId: operationsId, expectedVersion: 1 }
+    });
+    expect(assignArchived.statusCode).toBe(400);
+    const foreignWorkspaceId = crypto.randomUUID();
+    const foreignCategoryId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    sqlite
+      .prepare('INSERT INTO workspaces(id,name,type,created_at,updated_at) VALUES(?,?,?,?,?)')
+      .run(foreignWorkspaceId, '分类隔离空间', 'personal', timestamp, timestamp);
+    sqlite
+      .prepare(
+        'INSERT INTO report_categories(id,workspace_id,name,normalized_name,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?)'
+      )
+      .run(foreignCategoryId, foreignWorkspaceId, '外部分类', '外部分类', 0, timestamp, timestamp);
+    const assignForeign = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${second.json().id}`,
+      headers: headers(),
+      payload: { categoryId: foreignCategoryId, expectedVersion: 1 }
+    });
+    expect(assignForeign.statusCode).toBe(400);
+
+    const batchReport = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2026/35',
+      headers: headers(),
+      payload: {}
+    });
+    const batchItems = await Promise.all(
+      ['批量归类一', '批量归类二', '保留未分类'].map((contentMd) =>
+        app.inject({
+          method: 'POST',
+          url: `/api/reports/${batchReport.json().id}/items`,
+          headers: headers(),
+          payload: { type: 'completed', contentMd, projectId: firstProject.json().id }
+        })
+      )
+    );
+    const clientCategory = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(),
+      payload: {
+        name: '客户端',
+        assignments: batchItems.slice(0, 2).map((item) => ({
+          itemId: item.json().id,
+          expectedVersion: 1
+        }))
+      }
+    });
+    expect(clientCategory.statusCode).toBe(201);
+    const clientCategoryId = clientCategory.json().id;
+    const batchReportAfter = await app.inject({
+      method: 'GET',
+      url: '/api/reports/2026/35',
+      headers: headers()
+    });
+    expect(batchReportAfter.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: batchItems[0]!.json().id,
+          categoryId: clientCategoryId,
+          version: 2
+        }),
+        expect.objectContaining({
+          id: batchItems[1]!.json().id,
+          categoryId: clientCategoryId,
+          version: 2
+        })
+      ])
+    );
+    const rolledBackCategory = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(),
+      payload: {
+        name: '不会创建',
+        assignments: [
+          { itemId: batchItems[2]!.json().id, expectedVersion: 1 },
+          { itemId: batchItems[0]!.json().id, expectedVersion: 1 }
+        ]
+      }
+    });
+    expect(rolledBackCategory.statusCode).toBe(409);
+    const batchAfterRollback = await app.inject({
+      method: 'GET',
+      url: '/api/reports/2026/35',
+      headers: headers()
+    });
+    expect(
+      batchAfterRollback.json().items.find((item: { id: string }) => item.id === batchItems[2]!.json().id)
+    ).toMatchObject({ categoryId: null, version: 1 });
+
+    const reordered = await app.inject({
+      method: 'POST',
+      url: '/api/categories/reorder',
+      headers: headers(),
+      payload: { ids: [operationsId, developmentId, clientCategoryId] }
+    });
+    expect(reordered.statusCode).toBe(200);
+    const categoryList = await app.inject({ method: 'GET', url: '/api/categories', headers: headers() });
+    expect(categoryList.json().categories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: developmentId, name: '开发' }),
+        expect.objectContaining({ id: clientCategoryId, name: '客户端' }),
+        expect.objectContaining({ id: operationsId, name: '运维', archivedAt: expect.any(String) })
+      ])
+    );
+    expect(categoryList.json().categories).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: '不会创建' })])
+    );
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/api/settings/export',
+      headers: headers()
+    });
+    expect(exported.json().categories).toHaveLength(3);
+    expect(exported.json().reportItems).toEqual(
+      expect.arrayContaining([expect.objectContaining({ categoryId: operationsId })])
+    );
+  });
+
   it('uploads and serves a custom profile avatar', async () => {
     const boundary = 'zhoubao-avatar-boundary';
     const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);

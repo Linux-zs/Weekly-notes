@@ -29,6 +29,8 @@ interface ReportItemRow {
   report_id?: string;
   projectId?: string | null;
   project_id?: string | null;
+  categoryId?: string | null;
+  category_id?: string | null;
   type: ReportItemType;
   contentMd?: string;
   content_md?: string;
@@ -73,6 +75,7 @@ function serializeReportItem(row: ReportItemRow) {
     id: row.id,
     reportId: row.reportId ?? row.report_id,
     projectId: row.projectId ?? row.project_id ?? null,
+    categoryId: row.categoryId ?? row.category_id ?? null,
     type: row.type,
     contentMd: row.contentMd ?? row.content_md,
     occurredOn: row.occurredOn ?? row.occurred_on ?? null,
@@ -82,6 +85,24 @@ function serializeReportItem(row: ReportItemRow) {
     version: row.version,
     tags: loadTagsFor(row.id)
   };
+}
+
+function validProjectId(projectId: string | null, workspaceId: string) {
+  if (projectId === null) return true;
+  return Boolean(
+    sqlite
+      .prepare('SELECT 1 FROM projects WHERE id=? AND workspace_id=? AND archived_at IS NULL')
+      .get(projectId, workspaceId)
+  );
+}
+
+function validCategoryId(categoryId: string | null, workspaceId: string) {
+  if (categoryId === null) return true;
+  return Boolean(
+    sqlite
+      .prepare('SELECT 1 FROM report_categories WHERE id=? AND workspace_id=? AND archived_at IS NULL')
+      .get(categoryId, workspaceId)
+  );
 }
 
 function ensureReport(workspaceId: string, authorId: string, weekYear: number, weekNumber: number) {
@@ -128,7 +149,7 @@ function serializeReport(user: CurrentUser, weekYear: number, weekNumber: number
     ? (
         sqlite
           .prepare(
-            `SELECT id,report_id AS reportId,project_id AS projectId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE report_id=? ORDER BY type,position,created_at`
+            `SELECT id,report_id AS reportId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE report_id=? ORDER BY type,position,created_at`
           )
           .all(report.id) as ReportItemRow[]
       ).map(serializeReportItem)
@@ -188,6 +209,10 @@ export async function registerApi(app: FastifyInstance) {
       .prepare('SELECT id FROM weekly_reports WHERE id=? AND workspace_id=? AND author_id=?')
       .get(reportId, user.workspaceId, user.id);
     if (!report) return reply.code(404).send({ error: 'NOT_FOUND' });
+    if (!validProjectId(input.projectId ?? null, user.workspaceId))
+      return reply.code(400).send({ error: 'INVALID_PROJECT', message: '项目不可用' });
+    if (!validCategoryId(input.categoryId ?? null, user.workspaceId))
+      return reply.code(400).send({ error: 'INVALID_CATEGORY', message: '分类不可用' });
     const pos =
       input.position ??
       (
@@ -201,12 +226,13 @@ export async function registerApi(app: FastifyInstance) {
     sqlite.transaction(() => {
       sqlite
         .prepare(
-          'INSERT INTO report_items(id,report_id,project_id,type,content_md,occurred_on,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)'
+          'INSERT INTO report_items(id,report_id,project_id,category_id,type,content_md,occurred_on,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )
         .run(
           itemId,
           reportId,
           input.projectId ?? null,
+          input.categoryId ?? null,
           input.type,
           input.contentMd,
           input.occurredOn ?? null,
@@ -226,6 +252,7 @@ export async function registerApi(app: FastifyInstance) {
       id: itemId,
       reportId,
       projectId: input.projectId ?? null,
+      categoryId: input.categoryId ?? null,
       type: input.type,
       contentMd: input.contentMd,
       occurredOn: input.occurredOn ?? null,
@@ -248,14 +275,27 @@ export async function registerApi(app: FastifyInstance) {
     if (!current) return reply.code(404).send({ error: 'NOT_FOUND' });
     if (current.version !== body.expectedVersion)
       return reply.code(409).send({ error: 'VERSION_CONFLICT', current: serializeReportItem(current) });
+    if (
+      body.projectId !== undefined &&
+      body.projectId !== current.project_id &&
+      !validProjectId(body.projectId, user.workspaceId)
+    )
+      return reply.code(400).send({ error: 'INVALID_PROJECT', message: '项目不可用' });
+    if (
+      body.categoryId !== undefined &&
+      body.categoryId !== current.category_id &&
+      !validCategoryId(body.categoryId, user.workspaceId)
+    )
+      return reply.code(400).send({ error: 'INVALID_CATEGORY', message: '分类不可用' });
     const timestamp = now();
     sqlite.transaction(() => {
       const result = sqlite
         .prepare(
-          'UPDATE report_items SET project_id=?,type=?,content_md=?,occurred_on=?,progress=?,note=?,position=?,version=version+1,updated_at=? WHERE id=? AND version=?'
+          'UPDATE report_items SET project_id=?,category_id=?,type=?,content_md=?,occurred_on=?,progress=?,note=?,position=?,version=version+1,updated_at=? WHERE id=? AND version=?'
         )
         .run(
           body.projectId === undefined ? current.project_id : body.projectId,
+          body.categoryId === undefined ? current.category_id : body.categoryId,
           body.type ?? current.type,
           body.contentMd ?? current.content_md,
           body.occurredOn === undefined ? current.occurred_on : body.occurredOn,
@@ -274,7 +314,7 @@ export async function registerApi(app: FastifyInstance) {
     })();
     const row = sqlite
       .prepare(
-        'SELECT id,report_id AS reportId,project_id AS projectId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
+        'SELECT id,report_id AS reportId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
       )
       .get(itemId) as ReportItemRow;
     return serializeReportItem(row);
@@ -403,20 +443,82 @@ export async function registerApi(app: FastifyInstance) {
   app.post('/api/reports/:id/reorder', { preHandler: requireUser }, async (request, reply) => {
     const { id: reportId } = uuidParam.parse(request.params);
     const body = z
-      .object({ type: z.enum(reportItemTypes), ids: z.array(z.string().uuid()) })
+      .object({
+        type: z.enum(reportItemTypes),
+        ids: z.array(z.string().uuid()),
+        move: z
+          .object({
+            itemId: z.string().uuid(),
+            projectId: z.string().uuid().nullable(),
+            categoryId: z.string().uuid().nullable(),
+            expectedVersion: z.number().int().positive()
+          })
+          .optional()
+      })
       .parse(request.body);
+    const user = request.currentUser!;
     const report = sqlite
       .prepare('SELECT 1 FROM weekly_reports WHERE id=? AND workspace_id=? AND author_id=?')
-      .get(reportId, request.currentUser!.workspaceId, request.currentUser!.id);
+      .get(reportId, user.workspaceId, user.id);
     if (!report) return reply.code(404).send({ error: 'NOT_FOUND' });
-    sqlite.transaction(() =>
-      body.ids.forEach((itemId, index) =>
-        sqlite
-          .prepare('UPDATE report_items SET position=?,updated_at=? WHERE id=? AND report_id=? AND type=?')
-          .run(index, now(), itemId, reportId, body.type)
-      )
-    )();
-    return { ok: true };
+    const currentItems = sqlite
+      .prepare('SELECT id FROM report_items WHERE report_id=? AND type=?')
+      .all(reportId, body.type) as Array<{ id: string }>;
+    if (
+      body.ids.length !== currentItems.length ||
+      new Set(body.ids).size !== body.ids.length ||
+      currentItems.some((item) => !body.ids.includes(item.id))
+    )
+      return reply.code(400).send({ error: 'INVALID_REORDER', message: '排序条目不完整' });
+
+    let moved: ReportItemRow | undefined;
+    if (body.move) {
+      moved = sqlite
+        .prepare('SELECT * FROM report_items WHERE id=? AND report_id=? AND type=?')
+        .get(body.move.itemId, reportId, body.type) as ReportItemRow | undefined;
+      if (!moved) return reply.code(400).send({ error: 'INVALID_MOVE' });
+      if (moved.version !== body.move.expectedVersion)
+        return reply.code(409).send({ error: 'VERSION_CONFLICT', current: serializeReportItem(moved) });
+      if (!validProjectId(body.move.projectId, user.workspaceId))
+        return reply.code(400).send({ error: 'INVALID_PROJECT', message: '项目不可用' });
+      if (!validCategoryId(body.move.categoryId, user.workspaceId))
+        return reply.code(400).send({ error: 'INVALID_CATEGORY', message: '分类不可用' });
+    }
+
+    const timestamp = now();
+    const updatePosition = sqlite.prepare(
+      'UPDATE report_items SET position=?,updated_at=? WHERE id=? AND report_id=? AND type=?'
+    );
+    sqlite.transaction(() => {
+      if (body.move) {
+        const result = sqlite
+          .prepare(
+            'UPDATE report_items SET project_id=?,category_id=?,version=version+1,updated_at=? WHERE id=? AND report_id=? AND type=? AND version=?'
+          )
+          .run(
+            body.move.projectId,
+            body.move.categoryId,
+            timestamp,
+            body.move.itemId,
+            reportId,
+            body.type,
+            body.move.expectedVersion
+          );
+        if (!result.changes) throw new Error('VERSION_CONFLICT');
+      }
+      body.ids.forEach((itemId, index) => updatePosition.run(index, timestamp, itemId, reportId, body.type));
+      sqlite
+        .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
+        .run(timestamp, reportId);
+    })();
+    const movedItem = body.move
+      ? (sqlite
+          .prepare(
+            'SELECT id,report_id AS reportId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
+          )
+          .get(body.move.itemId) as ReportItemRow)
+      : null;
+    return { ok: true, movedItem: movedItem ? serializeReportItem(movedItem) : null };
   });
 
   app.get('/api/search', { preHandler: requireUser }, async (request) => {

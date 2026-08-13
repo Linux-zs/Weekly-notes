@@ -9,6 +9,7 @@ export type AuthProvider = (typeof authProviders)[number];
 
 export const reportItemInputSchema = z.object({
   projectId: z.string().uuid().nullable().optional(),
+  categoryId: z.string().uuid().nullable().optional(),
   type: z.enum(reportItemTypes),
   contentMd: z.string().max(30_000),
   occurredOn: z.iso.date().nullable().optional(),
@@ -16,6 +17,10 @@ export const reportItemInputSchema = z.object({
   note: z.string().max(2_000).optional(),
   tagIds: z.array(z.string().uuid()).max(20).default([]),
   position: z.number().int().min(0).optional()
+});
+
+export const reportCategoryInputSchema = z.object({
+  name: z.string().trim().min(1).max(40)
 });
 
 export const projectInputSchema = z.object({
@@ -46,10 +51,18 @@ export interface Project {
   position: number;
 }
 
+export interface ReportCategory {
+  id: string;
+  name: string;
+  position: number;
+  archivedAt: string | null;
+}
+
 export interface ReportItem {
   id: string;
   reportId: string;
   projectId: string | null;
+  categoryId: string | null;
   type: ReportItemType;
   contentMd: string;
   occurredOn: string | null;

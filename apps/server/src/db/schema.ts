@@ -72,6 +72,19 @@ export const projects = sqliteTable('projects', {
   archivedAt: text('archived_at'),
   ...timestamps
 });
+export const reportCategories = sqliteTable(
+  'report_categories',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    position: integer('position').notNull(),
+    archivedAt: text('archived_at'),
+    ...timestamps
+  },
+  (t) => [uniqueIndex('report_category_workspace_name_uq').on(t.workspaceId, t.normalizedName)]
+);
 export const weeklyReports = sqliteTable(
   'weekly_reports',
   {
@@ -91,6 +104,7 @@ export const reportItems = sqliteTable('report_items', {
   id: text('id').primaryKey(),
   reportId: text('report_id').notNull(),
   projectId: text('project_id'),
+  categoryId: text('category_id'),
   type: text('type').notNull(),
   contentMd: text('content_md').notNull(),
   occurredOn: text('occurred_on'),

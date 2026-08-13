@@ -53,7 +53,21 @@ CREATE INDEX IF NOT EXISTS idx_workspace_invitations_email ON workspace_invitati
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id,user_id);`,
   `DROP TABLE IF EXISTS memo_card_tags;
 DROP TABLE IF EXISTS memo_cards;`,
-  `UPDATE report_items SET type='other' WHERE type='risk';`
+  `UPDATE report_items SET type='other' WHERE type='risk';`,
+  `CREATE TABLE IF NOT EXISTS report_categories (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  archived_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(workspace_id,normalized_name)
+);
+ALTER TABLE report_items ADD COLUMN category_id TEXT REFERENCES report_categories(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_report_categories_workspace ON report_categories(workspace_id,archived_at,position);
+CREATE INDEX IF NOT EXISTS idx_items_category ON report_items(category_id);`
 ];
 
 export function runMigrations(sqlite: Database.Database) {

@@ -29,7 +29,17 @@ describe('database migrations', () => {
       type: 'other'
     });
     expect(sqlite.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({
-      version: 6
+      version: 7
     });
+  });
+
+  it('adds an empty category catalog without changing existing report items', () => {
+    sqlite = new Database(':memory:');
+    runMigrations(sqlite);
+
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM report_categories').get()).toEqual({ count: 0 });
+    expect(
+      sqlite.prepare("SELECT name FROM pragma_table_info('report_items') WHERE name='category_id'").get()
+    ).toEqual({ name: 'category_id' });
   });
 });

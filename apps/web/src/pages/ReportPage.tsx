@@ -3,6 +3,7 @@ import {
   DndContext,
   KeyboardSensor,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent
@@ -16,7 +17,14 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Project, ReportItem, ReportItemProgress, ReportItemType, WeeklyReport } from '@zhoubao/shared';
+import type {
+  Project,
+  ReportCategory,
+  ReportItem,
+  ReportItemProgress,
+  ReportItemType,
+  WeeklyReport
+} from '@zhoubao/shared';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -55,9 +63,21 @@ const copySections: ReportItemType[] = ['completed', 'other', 'next_plan'];
 const projectColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 type User = { id: string; displayName: string; email: string | null; avatarUrl: string | null };
 type ReportWeekSummary = { year: number; weeks: Array<{ weekNumber: number; itemCount: number }> };
-type ProjectItemGroup = { key: string; project: Project | null; items: ReportItem[] };
+type CategoryItemGroup = {
+  key: string;
+  category: ReportCategory | null;
+  items: ReportItem[];
+};
+type ProjectItemGroup = {
+  key: string;
+  project: Project | null;
+  items: ReportItem[];
+  categoryGroups: CategoryItemGroup[];
+};
 type ProjectDraft = { name: string; color: string };
 type ItemMeta = { progress: ReportItemProgress; note: string };
+type CategoryAssignment = { itemId: string; expectedVersion: number };
+type CreateCategoryInput = { name: string; assignments?: CategoryAssignment[] };
 const progressLabels: Record<ReportItemProgress, string> = {
   completed: '已完成',
   answered: '已解答',
@@ -97,21 +117,41 @@ export function ReportPage({ user }: { user: User }) {
     queryKey: ['projects'],
     queryFn: () => api<{ projects: Project[] }>('/api/projects')
   });
+  const categories = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => api<{ categories: ReportCategory[] }>('/api/categories')
+  });
   useEffect(() => setActiveSection(0), [year, week]);
   const addMutation = useMutation({
-    mutationFn: async ({ type, projectId }: { type: ReportItemType; projectId: string | null }) => {
+    mutationFn: async ({
+      type,
+      projectId,
+      categoryId
+    }: {
+      type: ReportItemType;
+      projectId: string | null;
+      categoryId: string | null;
+    }) => {
       let data = report.data!;
       if (!data.id)
         data = await api<WeeklyReport>(`/api/reports/${year}/${week}`, { method: 'PUT', body: '{}' });
       return api(`/api/reports/${data.id}/items`, {
         method: 'POST',
-        body: JSON.stringify({ type, projectId, contentMd: '' })
+        body: JSON.stringify({ type, projectId, categoryId, contentMd: '' })
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['report', year, week] });
       qc.invalidateQueries({ queryKey: ['report-weeks', year] });
     }
+  });
+  const createCategory = useMutation({
+    mutationFn: ({ name, assignments }: CreateCategoryInput) =>
+      api<ReportCategory>('/api/categories', {
+        method: 'POST',
+        body: JSON.stringify({ name, assignments })
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] })
   });
   const createProject = useMutation({
     mutationFn: async ({ type, draft }: { type: ReportItemType; draft: ProjectDraft }) => {
@@ -135,21 +175,22 @@ export function ReportPage({ user }: { user: User }) {
     }
   });
 
-  if (report.isLoading || reportWeeks.isLoading || projects.isLoading)
+  if (report.isLoading || reportWeeks.isLoading || projects.isLoading || categories.isLoading)
     return (
       <PageFrame title="周报">
         <Loading />
       </PageFrame>
     );
-  if (report.error || reportWeeks.error || projects.error)
+  if (report.error || reportWeeks.error || projects.error || categories.error)
     return (
       <PageFrame title="周报">
         <ErrorState
-          message={(report.error ?? reportWeeks.error ?? projects.error)!.message}
+          message={(report.error ?? reportWeeks.error ?? projects.error ?? categories.error)!.message}
           onRetry={() => {
             report.refetch();
             reportWeeks.refetch();
             projects.refetch();
+            categories.refetch();
           }}
         />
       </PageFrame>
@@ -165,7 +206,9 @@ export function ReportPage({ user }: { user: User }) {
     );
   };
   const copyReport = async () => {
-    await navigator.clipboard.writeText(buildReportText(data, projects.data!.projects));
+    await navigator.clipboard.writeText(
+      buildReportText(data, projects.data!.projects, categories.data!.categories)
+    );
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
@@ -226,7 +269,9 @@ export function ReportPage({ user }: { user: User }) {
           items={data.items.filter((item) => item.type === activeType)}
           report={data}
           projects={activeProjects}
-          onAdd={(projectId) => addMutation.mutate({ type: activeType, projectId })}
+          categories={categories.data!.categories}
+          onAdd={(projectId, categoryId) => addMutation.mutate({ type: activeType, projectId, categoryId })}
+          onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
           onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
           creatingProject={createProject.isPending}
           onPrevious={() => setActiveSection((index) => Math.max(0, index - 1))}
@@ -242,7 +287,9 @@ export function ReportPage({ user }: { user: User }) {
             items={data.items.filter((item) => item.type === 'other')}
             report={data}
             projects={activeProjects}
-            onAdd={(projectId) => addMutation.mutate({ type: 'other', projectId })}
+            categories={categories.data!.categories}
+            onAdd={(projectId, categoryId) => addMutation.mutate({ type: 'other', projectId, categoryId })}
+            onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
             onCreateProject={(draft) => createProject.mutateAsync({ type: 'other', draft })}
             creatingProject={createProject.isPending}
             index={activeSection}
@@ -259,8 +306,9 @@ export function ReportPage({ user }: { user: User }) {
   );
 }
 
-function buildReportText(report: WeeklyReport, projects: Project[]) {
+export function buildReportText(report: WeeklyReport, projects: Project[], categories: ReportCategory[]) {
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+  const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
   const lines = [
     `第 ${report.weekNumber} 周工作汇报（${report.weekStart} 至 ${report.weekEnd}）`,
     `汇报人：${report.author.displayName}`,
@@ -268,7 +316,13 @@ function buildReportText(report: WeeklyReport, projects: Project[]) {
   ];
   for (const type of copySections) {
     lines.push(`【${sectionLabels[type]}】`);
-    const items = report.items.filter((item) => item.type === type && item.contentMd.trim());
+    const items = groupItemsByProjectAndCategory(
+      report.items.filter((item) => item.type === type),
+      projects,
+      categories
+    )
+      .flatMap((group) => group.categoryGroups.flatMap((categoryGroup) => categoryGroup.items))
+      .filter((item) => item.contentMd.trim());
     if (!items.length) lines.push('无');
     else
       items.forEach((item, index) => {
@@ -278,7 +332,8 @@ function buildReportText(report: WeeklyReport, projects: Project[]) {
           .join(' · ');
         const summary =
           summarizeMarkdown(item.contentMd) || (item.contentMd.trim() ? '详见周报详情' : '暂无内容');
-        lines.push(`${index + 1}. ${summary}${meta ? `（${meta}）` : ''}`);
+        const category = item.categoryId ? categoryNames.get(item.categoryId) : null;
+        lines.push(`${index + 1}. [${category ?? '未分类'}] ${summary}${meta ? `（${meta}）` : ''}`);
       });
     lines.push('');
   }
@@ -379,17 +434,48 @@ function WeekNavigator({
   );
 }
 
-function groupItemsByProject(items: ReportItem[], projects: Project[]) {
+export function groupItemsByProjectAndCategory(
+  items: ReportItem[],
+  projects: Project[],
+  categories: ReportCategory[]
+) {
   const projectById = new Map(projects.map((project) => [project.id, project]));
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
   const groups = new Map<string, ProjectItemGroup>();
   for (const item of items) {
     const project = item.projectId ? (projectById.get(item.projectId) ?? null) : null;
     const key = project?.id ?? 'unassigned';
-    const group = groups.get(key) ?? { key, project, items: [] };
+    const group = groups.get(key) ?? { key, project, items: [], categoryGroups: [] };
     group.items.push(item);
     groups.set(key, group);
   }
+  for (const group of groups.values()) {
+    const categoryGroups = new Map<string, CategoryItemGroup>();
+    for (const item of group.items) {
+      const category = item.categoryId ? (categoryById.get(item.categoryId) ?? null) : null;
+      const key = category?.id ?? 'uncategorized';
+      const categoryGroup = categoryGroups.get(key) ?? { key, category, items: [] };
+      categoryGroup.items.push(item);
+      categoryGroups.set(key, categoryGroup);
+    }
+    group.categoryGroups = [...categoryGroups.values()].sort((left, right) => {
+      if (!left.category) return 1;
+      if (!right.category) return -1;
+      return (
+        left.category.position - right.category.position ||
+        left.category.name.localeCompare(right.category.name)
+      );
+    });
+  }
   return [...groups.values()];
+}
+
+export function lastActiveCategoryId(group: ProjectItemGroup) {
+  for (let index = group.categoryGroups.length - 1; index >= 0; index -= 1) {
+    const category = group.categoryGroups[index]?.category;
+    if (category && !category.archivedAt) return category.id;
+  }
+  return null;
 }
 
 function ReportOverview({ report }: { report: WeeklyReport }) {
@@ -427,7 +513,9 @@ function ReportSection({
   items,
   report,
   projects,
+  categories,
   onAdd,
+  onCreateCategory,
   onCreateProject,
   creatingProject,
   index,
@@ -443,7 +531,9 @@ function ReportSection({
   items: ReportItem[];
   report: WeeklyReport;
   projects: Project[];
-  onAdd: (projectId: string | null) => void;
+  categories: ReportCategory[];
+  onAdd: (projectId: string | null, categoryId: string | null) => void;
+  onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
   onCreateProject: (draft: ProjectDraft) => Promise<Project>;
   creatingProject: boolean;
   index: number;
@@ -459,22 +549,101 @@ function ReportSection({
   const [projectEditorOpen, setProjectEditorOpen] = useState(false);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>({ name: '', color: projectColors[0] });
   const [projectError, setProjectError] = useState('');
+  const groups = groupItemsByProjectAndCategory(items, projects, categories);
+  const orderedItems = groups.flatMap((group) =>
+    group.categoryGroups.flatMap((categoryGroup) => categoryGroup.items)
+  );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
   const reorder = useMutation({
-    mutationFn: (ids: string[]) =>
-      api(`/api/reports/${report.id}/reorder`, { method: 'POST', body: JSON.stringify({ type, ids }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] })
+    mutationFn: (payload: {
+      ids: string[];
+      move?: {
+        itemId: string;
+        projectId: string | null;
+        categoryId: string | null;
+        expectedVersion: number;
+      };
+    }) =>
+      api(`/api/reports/${report.id}/reorder`, {
+        method: 'POST',
+        body: JSON.stringify({ type, ...payload })
+      }),
+    onMutate: async (payload) => {
+      const queryKey = ['report', report.weekYear, report.weekNumber] as const;
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<WeeklyReport>(queryKey);
+      qc.setQueryData<WeeklyReport>(queryKey, (old) => {
+        if (!old) return old;
+        const byId = new Map(old.items.map((item) => [item.id, item]));
+        const moved = payload.move;
+        const reordered = payload.ids.map((id, position) => {
+          const item = byId.get(id)!;
+          return moved?.itemId === id
+            ? { ...item, projectId: moved.projectId, categoryId: moved.categoryId, position }
+            : { ...item, position };
+        });
+        const unaffected = old.items.filter((item) => item.type !== type);
+        return { ...old, items: [...unaffected, ...reordered] };
+      });
+      return { previous };
+    },
+    onError: (_error, _payload, context) => {
+      if (context?.previous)
+        qc.setQueryData(['report', report.weekYear, report.weekNumber], context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] })
   });
   const dragEnd = (event: DragEndEvent) => {
-    if (!event.over || event.active.id === event.over.id) return;
-    const old = items.findIndex((item) => item.id === event.active.id);
-    const next = items.findIndex((item) => item.id === event.over!.id);
-    reorder.mutate(arrayMove(items, old, next).map((item) => item.id));
+    if (!event.over || reorder.isPending) return;
+    const activeItem = orderedItems.find((item) => item.id === event.active.id);
+    if (!activeItem) return;
+    const overItem = orderedItems.find((item) => item.id === event.over!.id);
+    const target = event.over.data.current as
+      { kind?: string; projectId?: string | null; categoryId?: string | null } | undefined;
+    const targetProjectId =
+      target && 'projectId' in target
+        ? (target.projectId ?? null)
+        : (overItem?.projectId ?? activeItem.projectId);
+    const targetCategoryId =
+      target?.kind === 'project'
+        ? activeItem.categoryId
+        : target && 'categoryId' in target
+          ? (target.categoryId ?? null)
+          : (overItem?.categoryId ?? activeItem.categoryId);
+    const oldIndex = orderedItems.findIndex((item) => item.id === activeItem.id);
+    let targetIndex = overItem ? orderedItems.findIndex((item) => item.id === overItem.id) : -1;
+    if (targetIndex < 0) {
+      let matching = orderedItems
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.projectId === targetProjectId && item.categoryId === targetCategoryId);
+      if (!matching.length && target?.kind === 'project')
+        matching = orderedItems
+          .map((item, index) => ({ item, index }))
+          .filter(({ item }) => item.projectId === targetProjectId);
+      const lastMatchingIndex = matching.at(-1)?.index;
+      targetIndex = lastMatchingIndex ?? oldIndex;
+      if (lastMatchingIndex !== undefined && oldIndex > lastMatchingIndex)
+        targetIndex = lastMatchingIndex + 1;
+    }
+    const changedContainer =
+      activeItem.projectId !== targetProjectId || activeItem.categoryId !== targetCategoryId;
+    if (!changedContainer && oldIndex === targetIndex) return;
+    const nextItems = arrayMove(orderedItems, oldIndex, targetIndex);
+    reorder.mutate({
+      ids: nextItems.map((item) => item.id),
+      move: changedContainer
+        ? {
+            itemId: activeItem.id,
+            projectId: targetProjectId,
+            categoryId: targetCategoryId,
+            expectedVersion: activeItem.version
+          }
+        : undefined
+    });
   };
-  const groups = groupItemsByProject(items, projects);
   const openProjectEditor = () => {
     setProjectDraft({ name: '', color: projectColors[projects.length % projectColors.length] });
     setProjectError('');
@@ -538,7 +707,10 @@ function ReportSection({
         {reorder.error && <div className="page-action-error">排序保存失败：{reorder.error.message}</div>}
         {items.length ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
-            <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+            <SortableContext
+              items={orderedItems.map((item) => item.id)}
+              strategy={verticalListSortingStrategy}
+            >
               <div className="project-report-groups">
                 {groups.map((group) => (
                   <ProjectReportGroup
@@ -546,14 +718,16 @@ function ReportSection({
                     group={group}
                     report={report}
                     projects={projects}
-                    onAdd={() => onAdd(group.project?.id ?? null)}
+                    categories={categories}
+                    onAdd={(categoryId) => onAdd(group.project?.id ?? null, categoryId)}
+                    onCreateCategory={onCreateCategory}
                   />
                 ))}
               </div>
             </SortableContext>
           </DndContext>
         ) : (
-          <button className="section-empty" onClick={() => onAdd(null)}>
+          <button className="section-empty" onClick={() => onAdd(null, null)}>
             <Plus size={18} />
             <span>添加一条{sectionLabels[type]}</span>
           </button>
@@ -621,16 +795,24 @@ function ProjectReportGroup({
   group,
   report,
   projects,
-  onAdd
+  categories,
+  onAdd,
+  onCreateCategory
 }: {
   group: ProjectItemGroup;
   report: WeeklyReport;
   projects: Project[];
-  onAdd: () => void;
+  categories: ReportCategory[];
+  onAdd: (categoryId: string | null) => void;
+  onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
 }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [projectName, setProjectName] = useState(group.project?.name ?? '');
+  const projectDrop = useDroppable({
+    id: `project-drop:${group.key}`,
+    data: { kind: 'project', projectId: group.project?.id ?? null }
+  });
   useEffect(() => setProjectName(group.project?.name ?? ''), [group.project?.id, group.project?.name]);
   const saveProjectName = useMutation({
     mutationFn: async (name: string) => {
@@ -662,9 +844,15 @@ function ProjectReportGroup({
     if (name && name !== group.project?.name) saveProjectName.mutate(name);
     else setProjectName(group.project?.name ?? '');
   };
+  const sequenceById = new Map(
+    group.categoryGroups
+      .flatMap((categoryGroup) => categoryGroup.items)
+      .map((item, index) => [item.id, index + 1])
+  );
+  const defaultCategoryId = lastActiveCategoryId(group);
   return (
-    <section className="project-report-group">
-      <div className="project-group-label">
+    <section className={`project-report-group${projectDrop.isOver ? ' project-drop-active' : ''}`}>
+      <div className="project-group-label" ref={projectDrop.setNodeRef}>
         <i style={{ background: group.project?.color ?? '#98A2B3' }} />
         <div className="project-name-control">
           {renaming ? (
@@ -707,15 +895,221 @@ function ProjectReportGroup({
         <div className="page-action-error">项目名称保存失败：{saveProjectName.error.message}</div>
       )}
       <div className="project-group-rows">
-        {group.items.map((item, index) => (
-          <ReportItemRow key={item.id} item={item} sequence={index + 1} report={report} projects={projects} />
+        {group.categoryGroups.map((categoryGroup) => (
+          <CategoryReportGroup
+            key={categoryGroup.key}
+            group={categoryGroup}
+            projectId={group.project?.id ?? null}
+            report={report}
+            projects={projects}
+            categories={categories}
+            sequenceById={sequenceById}
+            onCreateCategory={onCreateCategory}
+          />
         ))}
-        <button className="project-row-add" onClick={onAdd}>
+        <button className="project-row-add" onClick={() => onAdd(defaultCategoryId)}>
           <Plus size={13} />
           添加一条
         </button>
       </div>
     </section>
+  );
+}
+
+function CategoryReportGroup({
+  group,
+  projectId,
+  report,
+  projects,
+  categories,
+  sequenceById,
+  onCreateCategory
+}: {
+  group: CategoryItemGroup;
+  projectId: string | null;
+  report: WeeklyReport;
+  projects: Project[];
+  categories: ReportCategory[];
+  sequenceById: Map<string, number>;
+  onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+}) {
+  const qc = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
+  const [categoryName, setCategoryName] = useState(group.category?.name ?? '');
+  const [categoryError, setCategoryError] = useState('');
+  const drop = useDroppable({
+    id: `category-drop:${projectId ?? 'unassigned'}:${group.key}`,
+    data: { kind: 'category', projectId, categoryId: group.category?.id ?? null }
+  });
+  useEffect(() => {
+    if (!renaming) setCategoryName(group.category?.name ?? '');
+  }, [group.category?.id, group.category?.name, renaming]);
+  const saveCategory = useMutation({
+    mutationFn: (name: string) =>
+      group.category
+        ? api<ReportCategory>(`/api/categories/${group.category.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name })
+          })
+        : onCreateCategory(
+            name,
+            group.items.map((item) => ({ itemId: item.id, expectedVersion: item.version }))
+          ),
+    onSuccess: () => {
+      setRenaming(false);
+      setCategoryError('');
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
+    }
+  });
+  const finishCategoryRename = () => {
+    if (saveCategory.isPending) return;
+    const name = categoryName.trim();
+    if (!name) {
+      setCategoryError('请输入分类名称');
+      return;
+    }
+    if (group.category && name === group.category.name) {
+      setRenaming(false);
+      setCategoryError('');
+      return;
+    }
+    setCategoryError('');
+    saveCategory.mutate(name);
+  };
+  const cancelCategoryRename = () => {
+    setCategoryName(group.category?.name ?? '');
+    setCategoryError('');
+    saveCategory.reset();
+    setRenaming(false);
+  };
+  return (
+    <section
+      ref={drop.setNodeRef}
+      className={`category-report-group${drop.isOver ? ' category-drop-active' : ''}`}
+    >
+      <div
+        className={`category-group-label${renaming ? ' category-label-editing' : ''}`}
+        onDoubleClick={() => {
+          if (saveCategory.isPending) return;
+          saveCategory.reset();
+          setCategoryError('');
+          setRenaming(true);
+        }}
+        title="双击编辑分类"
+      >
+        {renaming ? (
+          <input
+            className="category-name-input"
+            autoFocus
+            value={categoryName}
+            onChange={(event) => setCategoryName(event.target.value)}
+            onBlur={finishCategoryRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+              if (event.key === 'Escape') cancelCategoryRename();
+            }}
+            maxLength={40}
+            placeholder="分类名称"
+            aria-label={group.category ? `编辑分类 ${group.category.name}` : '为未分类条目创建分类'}
+            disabled={saveCategory.isPending}
+          />
+        ) : (
+          <strong>{group.category?.name ?? '未分类'}</strong>
+        )}
+        {group.category?.archivedAt && <small>已停用</small>}
+        <span>{group.items.length} 条</span>
+        {(categoryError || saveCategory.error) && (
+          <small className="category-edit-error">
+            {categoryError || saveCategory.error?.message || '分类保存失败'}
+          </small>
+        )}
+      </div>
+      <div className="category-group-rows">
+        {group.items.map((item) => (
+          <ReportItemRow
+            key={item.id}
+            item={item}
+            sequence={sequenceById.get(item.id) ?? 1}
+            report={report}
+            projects={projects}
+            categories={categories}
+            onCreateCategory={onCreateCategory}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CategoryCreateModal({
+  open,
+  onOpenChange,
+  onCreate
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreate: (name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setName('');
+      setError('');
+    }
+  }, [open]);
+  const submit = async () => {
+    const value = name.trim();
+    if (!value) return setError('请输入分类名称');
+    setPending(true);
+    setError('');
+    try {
+      await onCreate(value);
+      onOpenChange(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '分类创建失败');
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(value) => !pending && onOpenChange(value)}
+      title="新建条目分类"
+      description="分类会在当前工作区的所有项目和周报中复用。"
+    >
+      <form
+        className="dialog-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <label>
+          分类名称
+          <input
+            autoFocus
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={40}
+            placeholder="例如：开发、运维"
+            required
+          />
+        </label>
+        {error && <div className="form-error">{error}</div>}
+        <div className="dialog-actions">
+          <button type="button" className="button secondary" onClick={() => onOpenChange(false)}>
+            取消
+          </button>
+          <button className="button" disabled={pending}>
+            {pending ? '创建中…' : '创建并使用'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -737,18 +1131,23 @@ function ReportItemRow({
   item,
   report,
   sequence,
-  projects
+  projects,
+  categories,
+  onCreateCategory
 }: {
   item: ReportItem;
   report: WeeklyReport;
   sequence: number;
   projects: Project[];
+  categories: ReportCategory[];
+  onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
 }) {
   const qc = useQueryClient();
   const [initialMeta] = useState(() => readInitialItemMeta(item));
   const [content, setContent] = useState(item.contentMd);
   const [itemMeta, setItemMeta] = useState<ItemMeta>(initialMeta.meta);
   const [projectId, setProjectId] = useState(item.projectId ?? '');
+  const [categoryId, setCategoryId] = useState(item.categoryId ?? '');
   const [itemType, setItemType] = useState<ReportItemType>(item.type);
   const [occurredOn, setOccurredOn] = useState(item.occurredOn ?? '');
   const [tagIds, setTagIds] = useState(item.tags.map((tag) => tag.id));
@@ -757,6 +1156,7 @@ function ReportItemRow({
   const [detailEditing, setDetailEditing] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [categoryCreatorOpen, setCategoryCreatorOpen] = useState(false);
   const [status, setStatus] = useState<'saved' | 'saving' | 'error' | 'conflict'>('saved');
   const [conflictCurrent, setConflictCurrent] = useState<ReportItem | null>(null);
   const version = useRef(item.version);
@@ -765,19 +1165,28 @@ function ReportItemRow({
   const clickTimer = useRef<number | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const sortable = useSortable({ id: item.id });
+  const sortable = useSortable({
+    id: item.id,
+    data: {
+      kind: 'item',
+      projectId: item.projectId,
+      categoryId: item.categoryId
+    }
+  });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
 
   useEffect(() => {
     setContent(item.contentMd);
     setItemMeta({ progress: item.progress, note: item.note });
     setProjectId(item.projectId ?? '');
+    setCategoryId(item.categoryId ?? '');
     setItemType(item.type);
     setOccurredOn(item.occurredOn ?? '');
     setTagIds(item.tags.map((tag) => tag.id));
     version.current = item.version;
   }, [
     item.contentMd,
+    item.categoryId,
     item.id,
     item.note,
     item.occurredOn,
@@ -797,6 +1206,7 @@ function ReportItemRow({
           progress: itemMeta.progress,
           note: itemMeta.note,
           projectId: projectId || null,
+          categoryId: categoryId || null,
           type: itemType,
           occurredOn: occurredOn || null,
           tagIds,
@@ -836,7 +1246,7 @@ function ReportItemRow({
     }
     const timer = window.setTimeout(() => save.mutate(), 800);
     return () => window.clearTimeout(timer);
-  }, [content, itemMeta.progress, itemMeta.note, projectId, itemType, occurredOn, tagKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [content, itemMeta.progress, itemMeta.note, projectId, categoryId, itemType, occurredOn, tagKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const attachments = useQuery({
     queryKey: ['attachments', item.id],
     queryFn: () => api<{ attachments: Attachment[] }>(`/api/report-items/${item.id}/attachments`),
@@ -905,7 +1315,7 @@ function ReportItemRow({
     <article
       ref={sortable.setNodeRef}
       style={style}
-      className={`report-table-row ${status === 'conflict' ? 'item-conflict' : ''} ${status === 'error' ? 'item-save-error' : ''}`}
+      className={`report-table-row${sortable.isDragging ? ' item-dragging' : ''} ${status === 'conflict' ? 'item-conflict' : ''} ${status === 'error' ? 'item-save-error' : ''}`}
     >
       <div className="report-row-main">
         <button
@@ -996,6 +1406,7 @@ function ReportItemRow({
               setContent(conflictCurrent.contentMd);
               setItemMeta({ progress: conflictCurrent.progress, note: conflictCurrent.note });
               setProjectId(conflictCurrent.projectId ?? '');
+              setCategoryId(conflictCurrent.categoryId ?? '');
               setItemType(conflictCurrent.type);
               setOccurredOn(conflictCurrent.occurredOn ?? '');
               setTagIds(conflictCurrent.tags.map((tag) => tag.id));
@@ -1109,6 +1520,27 @@ function ReportItemRow({
                 </select>
               </label>
               <label>
+                条目分类
+                <select
+                  value={categoryId}
+                  onChange={(event) => {
+                    if (event.target.value === '__create__') setCategoryCreatorOpen(true);
+                    else setCategoryId(event.target.value);
+                  }}
+                >
+                  <option value="">未分类</option>
+                  {categories
+                    .filter((category) => !category.archivedAt || category.id === categoryId)
+                    .map((category) => (
+                      <option value={category.id} key={category.id}>
+                        {category.name}
+                        {category.archivedAt ? '（已停用）' : ''}
+                      </option>
+                    ))}
+                  <option value="__create__">＋ 新建分类…</option>
+                </select>
+              </label>
+              <label>
                 内容类型
                 <select
                   value={itemType}
@@ -1219,6 +1651,14 @@ function ReportItemRow({
           </div>
         </div>
       </Modal>
+      <CategoryCreateModal
+        open={categoryCreatorOpen}
+        onOpenChange={setCategoryCreatorOpen}
+        onCreate={async (name) => {
+          const category = await onCreateCategory(name);
+          setCategoryId(category.id);
+        }}
+      />
       <Modal
         open={Boolean(fullscreenImage)}
         onOpenChange={(open) => {

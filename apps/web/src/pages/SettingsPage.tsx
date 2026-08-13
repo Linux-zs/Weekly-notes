@@ -1,11 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Tag } from '@zhoubao/shared';
+import type { ReportCategory, Tag } from '@zhoubao/shared';
 import {
+  Archive,
+  ArchiveRestore,
+  ArrowDown,
+  ArrowUp,
   CheckCircle2,
   Camera,
   Database,
   Download,
   Link2,
+  Layers3,
   Palette,
   Plus,
   ShieldCheck,
@@ -61,13 +66,23 @@ export function SettingsPage() {
     queryFn: () => api<{ providers: Array<{ provider: string; enabled: boolean }> }>('/api/auth/providers')
   });
   const tags = useQuery({ queryKey: ['tags'], queryFn: () => api<{ tags: Tag[] }>('/api/tags') });
-  if (settings.isLoading || accounts.isLoading || providers.isLoading || tags.isLoading)
+  const categories = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => api<{ categories: ReportCategory[] }>('/api/categories')
+  });
+  if (
+    settings.isLoading ||
+    accounts.isLoading ||
+    providers.isLoading ||
+    tags.isLoading ||
+    categories.isLoading
+  )
     return (
       <div className="page">
         <Loading />
       </div>
     );
-  const error = settings.error ?? accounts.error ?? providers.error ?? tags.error;
+  const error = settings.error ?? accounts.error ?? providers.error ?? tags.error ?? categories.error;
   if (error)
     return (
       <div className="page">
@@ -78,6 +93,7 @@ export function SettingsPage() {
             accounts.refetch();
             providers.refetch();
             tags.refetch();
+            categories.refetch();
           }}
         />
       </div>
@@ -88,6 +104,7 @@ export function SettingsPage() {
       accounts={accounts.data!.accounts}
       providers={providers.data!.providers}
       tags={tags.data!.tags}
+      categories={categories.data!.categories}
       qc={qc}
     />
   );
@@ -98,12 +115,14 @@ function SettingsContent({
   accounts,
   providers,
   tags,
+  categories,
   qc
 }: {
   settings: SettingsData;
   accounts: Account[];
   providers: Array<{ provider: string; enabled: boolean }>;
   tags: Tag[];
+  categories: ReportCategory[];
   qc: ReturnType<typeof useQueryClient>;
 }) {
   const [displayName, setDisplayName] = useState(settings.profile.displayName);
@@ -116,6 +135,8 @@ function SettingsContent({
   const [editTag, setEditTag] = useState<Tag | null>(null);
   const [createTagOpen, setCreateTagOpen] = useState(false);
   const [deleteTagTarget, setDeleteTagTarget] = useState<Tag | null>(null);
+  const [editCategory, setEditCategory] = useState<ReportCategory | null>(null);
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [compact, setCompact] = useState(() => localStorage.getItem('weekly-report:compact') === 'true');
   useEffect(() => {
     if (location.hash === '#projects')
@@ -202,6 +223,57 @@ function SettingsContent({
       qc.invalidateQueries({ queryKey: ['tags'] });
     }
   });
+  const saveCategory = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api<ReportCategory>(`/api/categories/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name })
+      }),
+    onSuccess: () => {
+      setEditCategory(null);
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      qc.invalidateQueries({ queryKey: ['report'] });
+    }
+  });
+  const createCategory = useMutation({
+    mutationFn: (name: string) =>
+      api<ReportCategory>('/api/categories', {
+        method: 'POST',
+        body: JSON.stringify({ name })
+      }),
+    onSuccess: () => {
+      setCreateCategoryOpen(false);
+      qc.invalidateQueries({ queryKey: ['categories'] });
+    }
+  });
+  const archiveCategory = useMutation({
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
+      api(`/api/categories/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ archived })
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      qc.invalidateQueries({ queryKey: ['report'] });
+    }
+  });
+  const reorderCategories = useMutation({
+    mutationFn: (ids: string[]) =>
+      api('/api/categories/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] })
+  });
+  const moveCategory = (category: ReportCategory, delta: number) => {
+    const archived = Boolean(category.archivedAt);
+    const group = categories.filter((item) => Boolean(item.archivedAt) === archived);
+    const index = group.findIndex((item) => item.id === category.id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= group.length) return;
+    const reordered = [...group];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    const active = archived ? categories.filter((item) => !item.archivedAt) : reordered;
+    const retired = archived ? reordered : categories.filter((item) => item.archivedAt);
+    reorderCategories.mutate([...active, ...retired].map((item) => item.id));
+  };
   const applyCompact = (value: boolean) => {
     setCompact(value);
     localStorage.setItem('weekly-report:compact', String(value));
@@ -491,6 +563,84 @@ function SettingsContent({
             </a>
           </div>
         </section>
+        <section className="settings-card vertical settings-categories">
+          <div className="panel-heading">
+            <div>
+              <h2>
+                <Layers3 size={18} />
+                条目分类
+              </h2>
+              <p>分类在整个工作区复用；停用后历史周报仍保留原名称。</p>
+            </div>
+            <button
+              className="button secondary compact-button"
+              onClick={() => {
+                createCategory.reset();
+                setCreateCategoryOpen(true);
+              }}
+            >
+              <Plus size={14} />
+              新建分类
+            </button>
+          </div>
+          <div className="category-management">
+            {categories.length ? (
+              categories.map((category) => {
+                const peers = categories.filter(
+                  (item) => Boolean(item.archivedAt) === Boolean(category.archivedAt)
+                );
+                const index = peers.findIndex((item) => item.id === category.id);
+                return (
+                  <div className={category.archivedAt ? 'archived' : ''} key={category.id}>
+                    <span className="category-order">{String(index + 1).padStart(2, '0')}</span>
+                    <div>
+                      <strong>{category.name}</strong>
+                      <small>{category.archivedAt ? '已停用 · 历史可见' : '使用中'}</small>
+                    </div>
+                    <div className="category-order-actions">
+                      <button
+                        className="icon-button"
+                        aria-label={`上移分类 ${category.name}`}
+                        disabled={index === 0 || reorderCategories.isPending}
+                        onClick={() => moveCategory(category, -1)}
+                      >
+                        <ArrowUp size={14} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label={`下移分类 ${category.name}`}
+                        disabled={index === peers.length - 1 || reorderCategories.isPending}
+                        onClick={() => moveCategory(category, 1)}
+                      >
+                        <ArrowDown size={14} />
+                      </button>
+                    </div>
+                    <button className="button secondary" onClick={() => setEditCategory(category)}>
+                      编辑
+                    </button>
+                    <button
+                      className="button secondary category-archive-button"
+                      disabled={archiveCategory.isPending}
+                      onClick={() =>
+                        archiveCategory.mutate({ id: category.id, archived: !category.archivedAt })
+                      }
+                    >
+                      {category.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                      {category.archivedAt ? '恢复' : '停用'}
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <span className="muted">尚未创建分类，可在这里或周报条目中创建。</span>
+            )}
+          </div>
+          {(archiveCategory.error || reorderCategories.error) && (
+            <div className="page-action-error">
+              分类操作失败：{(archiveCategory.error ?? reorderCategories.error)!.message}
+            </div>
+          )}
+        </section>
         <section className="settings-card vertical settings-tags">
           <div className="panel-heading">
             <div>
@@ -577,6 +727,26 @@ function SettingsContent({
             </button>
           </div>
         </Modal>
+      )}
+      {editCategory && (
+        <CategoryEditor
+          category={editCategory}
+          onClose={() => setEditCategory(null)}
+          onSave={(name) => saveCategory.mutate({ id: editCategory.id, name })}
+          pending={saveCategory.isPending}
+          error={saveCategory.error?.message}
+        />
+      )}
+      {createCategoryOpen && (
+        <CategoryEditor
+          onClose={() => {
+            setCreateCategoryOpen(false);
+            createCategory.reset();
+          }}
+          onSave={(name) => createCategory.mutate(name)}
+          pending={createCategory.isPending}
+          error={createCategory.error?.message}
+        />
       )}
       {editTag && (
         <TagEditor
@@ -667,6 +837,59 @@ function SettingsContent({
         </Modal>
       )}
     </div>
+  );
+}
+
+function CategoryEditor({
+  category,
+  onClose,
+  onSave,
+  pending,
+  error
+}: {
+  category?: ReportCategory;
+  onClose: () => void;
+  onSave: (name: string) => void;
+  pending: boolean;
+  error?: string;
+}) {
+  const [name, setName] = useState(category?.name ?? '');
+  return (
+    <Modal
+      open
+      onOpenChange={(open) => !open && !pending && onClose()}
+      title={category ? '编辑条目分类' : '新建条目分类'}
+      description="名称在当前工作区内不可重复。"
+    >
+      <form
+        className="dialog-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(name.trim());
+        }}
+      >
+        <label>
+          分类名称
+          <input
+            autoFocus
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={40}
+            placeholder="例如：开发、运维"
+            required
+          />
+        </label>
+        {error && <div className="form-error">{error}</div>}
+        <div className="dialog-actions">
+          <button type="button" className="button secondary" onClick={onClose} disabled={pending}>
+            取消
+          </button>
+          <button className="button" disabled={pending}>
+            {pending ? '保存中…' : category ? '保存分类' : '创建分类'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

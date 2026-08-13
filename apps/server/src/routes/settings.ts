@@ -250,6 +250,11 @@ export async function registerSettings(app: FastifyInstance) {
         )
         .all(workspaceId),
       tags: sqlite.prepare('SELECT id,name,color FROM tags WHERE workspace_id=?').all(workspaceId),
+      categories: sqlite
+        .prepare(
+          'SELECT id,name,position,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM report_categories WHERE workspace_id=?'
+        )
+        .all(workspaceId),
       reports: sqlite
         .prepare(
           'SELECT id,week_year AS weekYear,week_number AS weekNumber,week_start AS weekStart,week_end AS weekEnd,created_at AS createdAt,updated_at AS updatedAt FROM weekly_reports WHERE workspace_id=? AND author_id=?'
@@ -257,7 +262,7 @@ export async function registerSettings(app: FastifyInstance) {
         .all(workspaceId, user.id),
       reportItems: sqlite
         .prepare(
-          'SELECT ri.id,ri.report_id AS reportId,ri.project_id AS projectId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
+          'SELECT ri.id,ri.report_id AS reportId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
         )
         .all(workspaceId, user.id),
       attachments: sqlite
