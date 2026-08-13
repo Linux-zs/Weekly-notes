@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Project, ReportCategory, ReportItem, WeeklyReport } from '@zhoubao/shared';
-import { buildReportText, groupItemsByProjectAndCategory, lastActiveCategoryId } from './ReportPage';
+import {
+  buildReportText,
+  groupItemsByProjectAndCategory,
+  lastActiveCategoryId,
+  previousReportWeek,
+  reportProgressSummary
+} from './ReportPage';
 
 const projects: Project[] = [
   { id: 'project-a', name: '项目甲', color: '#345B9B', archivedAt: null, position: 0 }
@@ -14,6 +20,7 @@ function item(id: string, categoryId: string | null, contentMd = id): ReportItem
   return {
     id,
     reportId: 'report',
+    importedFromItemId: null,
     projectId: 'project-a',
     categoryId,
     type: 'completed',
@@ -101,5 +108,38 @@ describe('weekly report category presentation', () => {
       allArchived
     )[0]!;
     expect(lastActiveCategoryId(fallbackGrouped)).toBeNull();
+  });
+
+  it('counts answered work as completed and labels incomplete work as in progress', () => {
+    const completed = item('completed', 'development', '已完成任务');
+    const answered = { ...item('answered', 'development', '已解答问题'), progress: 'answered' as const };
+    const inProgress = {
+      ...item('in-progress', 'operations', '继续推进任务'),
+      progress: 'incomplete' as const
+    };
+    expect(reportProgressSummary([completed, answered, inProgress])).toEqual({
+      total: 3,
+      completed: 2,
+      inProgress: 1,
+      projectCount: 1
+    });
+
+    const report: WeeklyReport = {
+      id: 'report',
+      weekYear: 2026,
+      weekNumber: 33,
+      weekStart: '2026-08-10',
+      weekEnd: '2026-08-16',
+      version: 1,
+      author: { id: 'user', displayName: '测试用户', email: null, avatarUrl: null },
+      items: [inProgress],
+      calendarDays: [],
+      holidayDataAvailable: true
+    };
+    expect(buildReportText(report, projects, categories)).toContain('推进中');
+  });
+
+  it('finds the previous ISO week across calendar years', () => {
+    expect(previousReportWeek('2024-12-30')).toEqual({ year: 2024, week: 52 });
   });
 });

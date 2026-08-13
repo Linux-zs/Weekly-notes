@@ -100,20 +100,25 @@ export const weeklyReports = sqliteTable(
   },
   (t) => [uniqueIndex('weekly_report_owner_week_uq').on(t.workspaceId, t.authorId, t.weekYear, t.weekNumber)]
 );
-export const reportItems = sqliteTable('report_items', {
-  id: text('id').primaryKey(),
-  reportId: text('report_id').notNull(),
-  projectId: text('project_id'),
-  categoryId: text('category_id'),
-  type: text('type').notNull(),
-  contentMd: text('content_md').notNull(),
-  occurredOn: text('occurred_on'),
-  progress: text('progress').notNull(),
-  note: text('note').notNull(),
-  position: integer('position').notNull(),
-  version: integer('version').notNull(),
-  ...timestamps
-});
+export const reportItems = sqliteTable(
+  'report_items',
+  {
+    id: text('id').primaryKey(),
+    reportId: text('report_id').notNull(),
+    importedFromItemId: text('imported_from_item_id'),
+    projectId: text('project_id'),
+    categoryId: text('category_id'),
+    type: text('type').notNull(),
+    contentMd: text('content_md').notNull(),
+    occurredOn: text('occurred_on'),
+    progress: text('progress').notNull(),
+    note: text('note').notNull(),
+    position: integer('position').notNull(),
+    version: integer('version').notNull(),
+    ...timestamps
+  },
+  (t) => [uniqueIndex('report_item_import_source_uq').on(t.reportId, t.importedFromItemId)]
+);
 export const tags = sqliteTable(
   'tags',
   {

@@ -18,9 +18,10 @@ describe('database migrations', () => {
         (1,'2026-01-01'),(2,'2026-01-01'),(3,'2026-01-01'),(4,'2026-01-01'),(5,'2026-01-01');
       CREATE TABLE report_items (
         id TEXT PRIMARY KEY,
+        report_id TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('completed','next_plan','risk','other'))
       );
-      INSERT INTO report_items(id,type) VALUES('legacy-risk','risk');
+      INSERT INTO report_items(id,report_id,type) VALUES('legacy-risk','legacy-report','risk');
     `);
 
     runMigrations(sqlite);
@@ -29,7 +30,7 @@ describe('database migrations', () => {
       type: 'other'
     });
     expect(sqlite.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({
-      version: 7
+      version: 8
     });
   });
 
@@ -41,5 +42,15 @@ describe('database migrations', () => {
     expect(
       sqlite.prepare("SELECT name FROM pragma_table_info('report_items') WHERE name='category_id'").get()
     ).toEqual({ name: 'category_id' });
+    expect(
+      sqlite
+        .prepare("SELECT name FROM pragma_table_info('report_items') WHERE name='imported_from_item_id'")
+        .get()
+    ).toEqual({ name: 'imported_from_item_id' });
+    expect(
+      sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_report_item_import_source'")
+        .get()
+    ).toEqual({ name: 'idx_report_item_import_source' });
   });
 });

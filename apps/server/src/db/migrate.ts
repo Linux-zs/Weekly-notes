@@ -67,7 +67,9 @@ DROP TABLE IF EXISTS memo_cards;`,
 );
 ALTER TABLE report_items ADD COLUMN category_id TEXT REFERENCES report_categories(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_report_categories_workspace ON report_categories(workspace_id,archived_at,position);
-CREATE INDEX IF NOT EXISTS idx_items_category ON report_items(category_id);`
+CREATE INDEX IF NOT EXISTS idx_items_category ON report_items(category_id);`,
+  `ALTER TABLE report_items ADD COLUMN imported_from_item_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_item_import_source ON report_items(report_id,imported_from_item_id) WHERE imported_from_item_id IS NOT NULL;`
 ];
 
 export function runMigrations(sqlite: Database.Database) {

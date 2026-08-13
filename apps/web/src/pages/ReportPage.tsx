@@ -33,6 +33,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Download,
   GripVertical,
   ImagePlus,
   Pencil,
@@ -81,7 +82,7 @@ type CreateCategoryInput = { name: string; assignments?: CategoryAssignment[] };
 const progressLabels: Record<ReportItemProgress, string> = {
   completed: '已完成',
   answered: '已解答',
-  incomplete: '未完成'
+  incomplete: '推进中'
 };
 
 function readInitialItemMeta(item: ReportItem): { meta: ItemMeta; legacy: boolean } {
@@ -478,30 +479,42 @@ export function lastActiveCategoryId(group: ProjectItemGroup) {
   return null;
 }
 
+export function previousReportWeek(weekStart: string) {
+  return isoWeekForDate(addDays(weekStart, -7));
+}
+
+export function reportProgressSummary(items: ReportItem[]) {
+  const visibleItems = items.filter((item) => item.contentMd.trim());
+  return {
+    total: visibleItems.length,
+    completed: visibleItems.filter((item) => item.progress === 'completed' || item.progress === 'answered')
+      .length,
+    inProgress: visibleItems.filter((item) => item.progress === 'incomplete').length,
+    projectCount: new Set(visibleItems.map((item) => item.projectId).filter(Boolean)).size
+  };
+}
+
 function ReportOverview({ report }: { report: WeeklyReport }) {
-  const visibleItems = report.items.filter((item) => item.contentMd.trim());
-  const completed = visibleItems.filter((item) => item.progress === 'completed').length;
-  const pending = visibleItems.filter((item) => item.progress === 'incomplete').length;
-  const projectIds = new Set(visibleItems.map((item) => item.projectId).filter(Boolean));
+  const summary = reportProgressSummary(report.items);
   return (
     <section className="briefing-summary week-overview" aria-label="本周工作概览">
       <h2 className="visually-hidden">本周工作概览</h2>
       <dl className="briefing-metrics">
         <div>
           <dt>汇报事项</dt>
-          <dd>{visibleItems.length}</dd>
+          <dd>{summary.total}</dd>
         </div>
         <div>
           <dt>已完成</dt>
-          <dd>{completed}</dd>
+          <dd>{summary.completed}</dd>
         </div>
         <div>
-          <dt>待推进</dt>
-          <dd>{pending}</dd>
+          <dt>推进中</dt>
+          <dd>{summary.inProgress}</dd>
         </div>
         <div>
           <dt>涉及项目</dt>
-          <dd>{projectIds.size}</dd>
+          <dd>{summary.projectCount}</dd>
         </div>
       </dl>
     </section>
@@ -547,6 +560,7 @@ function ReportSection({
 }) {
   const qc = useQueryClient();
   const [projectEditorOpen, setProjectEditorOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>({ name: '', color: projectColors[0] });
   const [projectError, setProjectError] = useState('');
   const groups = groupItemsByProjectAndCategory(items, projects, categories);
@@ -719,8 +733,10 @@ function ReportSection({
                     report={report}
                     projects={projects}
                     categories={categories}
+                    type={type}
                     onAdd={(categoryId) => onAdd(group.project?.id ?? null, categoryId)}
                     onCreateCategory={onCreateCategory}
+                    onImport={() => setImportOpen(true)}
                   />
                 ))}
               </div>
@@ -787,6 +803,13 @@ function ReportSection({
           </div>
         </form>
       </Modal>
+      <ImportPreviousItemsModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        report={report}
+        projects={projects}
+        categories={categories}
+      />
     </>
   );
 }
@@ -796,19 +819,26 @@ function ProjectReportGroup({
   report,
   projects,
   categories,
+  type,
   onAdd,
-  onCreateCategory
+  onCreateCategory,
+  onImport
 }: {
   group: ProjectItemGroup;
   report: WeeklyReport;
   projects: Project[];
   categories: ReportCategory[];
+  type: ReportItemType;
   onAdd: (categoryId: string | null) => void;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+  onImport: () => void;
 }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [projectName, setProjectName] = useState(group.project?.name ?? '');
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryError, setNewCategoryError] = useState('');
   const projectDrop = useDroppable({
     id: `project-drop:${group.key}`,
     data: { kind: 'project', projectId: group.project?.id ?? null }
@@ -838,11 +868,44 @@ function ProjectReportGroup({
       qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
     }
   });
+  const createProjectCategory = useMutation({
+    mutationFn: (name: string) => {
+      if (!report.id) throw new Error('请先创建周报');
+      return api<{ category: ReportCategory; item: ReportItem }>(`/api/reports/${report.id}/categories`, {
+        method: 'POST',
+        body: JSON.stringify({ name, projectId: group.project?.id ?? null, type })
+      });
+    },
+    onSuccess: () => {
+      setAddingCategory(false);
+      setNewCategoryName('');
+      setNewCategoryError('');
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
+      qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
+    }
+  });
   const finishRename = () => {
     const name = projectName.trim();
     setRenaming(false);
     if (name && name !== group.project?.name) saveProjectName.mutate(name);
     else setProjectName(group.project?.name ?? '');
+  };
+  const finishNewCategory = () => {
+    if (createProjectCategory.isPending) return;
+    const name = newCategoryName.trim();
+    if (!name) {
+      setNewCategoryError('请输入分类名称');
+      return;
+    }
+    setNewCategoryError('');
+    createProjectCategory.mutate(name);
+  };
+  const cancelNewCategory = () => {
+    setAddingCategory(false);
+    setNewCategoryName('');
+    setNewCategoryError('');
+    createProjectCategory.reset();
   };
   const sequenceById = new Map(
     group.categoryGroups
@@ -905,12 +968,49 @@ function ProjectReportGroup({
             categories={categories}
             sequenceById={sequenceById}
             onCreateCategory={onCreateCategory}
+            onImport={onImport}
           />
         ))}
-        <button className="project-row-add" onClick={() => onAdd(defaultCategoryId)}>
-          <Plus size={13} />
-          添加一条
-        </button>
+        <div className="project-add-row">
+          <div className={`project-category-add${addingCategory ? ' editing' : ''}`}>
+            {addingCategory ? (
+              <>
+                <input
+                  autoFocus
+                  value={newCategoryName}
+                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  onBlur={finishNewCategory}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                    if (event.key === 'Escape') cancelNewCategory();
+                  }}
+                  maxLength={40}
+                  placeholder="分类名称"
+                  aria-label={`为${group.project?.name ?? '未归属'}新增分类`}
+                  disabled={createProjectCategory.isPending}
+                />
+                {(newCategoryError || createProjectCategory.error) && (
+                  <small>{newCategoryError || createProjectCategory.error?.message}</small>
+                )}
+              </>
+            ) : (
+              <button
+                onClick={() => {
+                  createProjectCategory.reset();
+                  setNewCategoryError('');
+                  setAddingCategory(true);
+                }}
+              >
+                <Plus size={12} />
+                新增分类
+              </button>
+            )}
+          </div>
+          <button className="project-row-add" onClick={() => onAdd(defaultCategoryId)}>
+            <Plus size={13} />
+            添加一条
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -923,7 +1023,8 @@ function CategoryReportGroup({
   projects,
   categories,
   sequenceById,
-  onCreateCategory
+  onCreateCategory,
+  onImport
 }: {
   group: CategoryItemGroup;
   projectId: string | null;
@@ -932,6 +1033,7 @@ function CategoryReportGroup({
   categories: ReportCategory[];
   sequenceById: Map<string, number>;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+  onImport: () => void;
 }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
@@ -1035,6 +1137,7 @@ function CategoryReportGroup({
             projects={projects}
             categories={categories}
             onCreateCategory={onCreateCategory}
+            onImport={onImport}
           />
         ))}
       </div>
@@ -1113,6 +1216,162 @@ function CategoryCreateModal({
   );
 }
 
+function ImportPreviousItemsModal({
+  open,
+  onOpenChange,
+  report,
+  projects,
+  categories
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  report: WeeklyReport;
+  projects: Project[];
+  categories: ReportCategory[];
+}) {
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState<string[]>([]);
+  const sourceWeek = previousReportWeek(report.weekStart);
+  const previous = useQuery({
+    queryKey: ['report', sourceWeek.year, sourceWeek.week],
+    queryFn: () => api<WeeklyReport>(`/api/reports/${sourceWeek.year}/${sourceWeek.week}`),
+    enabled: open
+  });
+  const candidates = (previous.data?.items ?? []).filter(
+    (item) => item.progress === 'incomplete' && item.contentMd.trim()
+  );
+  const importedIds = new Set(
+    report.items.map((item) => item.importedFromItemId).filter((value): value is string => Boolean(value))
+  );
+  const availableIds = candidates.filter((item) => !importedIds.has(item.id)).map((item) => item.id);
+  const groups = groupItemsByProjectAndCategory(candidates, projects, categories);
+  useEffect(() => {
+    if (!open) setSelected([]);
+  }, [open]);
+  useEffect(() => {
+    setSelected((current) => current.filter((itemId) => availableIds.includes(itemId)));
+  }, [availableIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const importItems = useMutation({
+    mutationFn: () =>
+      api<{ items: ReportItem[] }>(`/api/reports/${report.weekYear}/${report.weekNumber}/import-items`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sources: selected.map((itemId) => ({
+            itemId,
+            expectedVersion: candidates.find((item) => item.id === itemId)!.version
+          }))
+        })
+      }),
+    onSuccess: () => {
+      setSelected([]);
+      onOpenChange(false);
+      qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
+      qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
+    }
+  });
+  const allSelected = availableIds.length > 0 && availableIds.every((itemId) => selected.includes(itemId));
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(value) => !importItems.isPending && onOpenChange(value)}
+      title="引入上周任务"
+      description={`选择 ${sourceWeek.year} 年第 ${sourceWeek.week} 周仍在推进的任务，复制到本周继续跟进。`}
+      wide
+    >
+      <div className="import-task-toolbar">
+        <label>
+          <input
+            type="checkbox"
+            checked={allSelected}
+            disabled={!availableIds.length || importItems.isPending}
+            onChange={(event) => setSelected(event.target.checked ? availableIds : [])}
+          />
+          全选可引入任务
+        </label>
+        <span>
+          已选择 {selected.length} / {availableIds.length} 条
+        </span>
+      </div>
+      <div className="import-task-list">
+        {previous.isLoading ? (
+          <Loading />
+        ) : previous.error ? (
+          <ErrorState message={previous.error.message} onRetry={() => previous.refetch()} />
+        ) : !candidates.length ? (
+          <div className="import-task-empty">上周没有可引入的推进中任务</div>
+        ) : (
+          groups.map((projectGroup) => (
+            <section className="import-project-group" key={projectGroup.key}>
+              <div className="import-project-heading">
+                <i style={{ background: projectGroup.project?.color ?? '#98A2B3' }} />
+                <strong>{projectGroup.project?.name ?? '未归属'}</strong>
+              </div>
+              {projectGroup.categoryGroups.map((categoryGroup) => (
+                <div className="import-category-group" key={categoryGroup.key}>
+                  <div className="import-category-heading">
+                    {categoryGroup.category?.name ?? '未分类'}
+                    {categoryGroup.category?.archivedAt && <small>已停用</small>}
+                  </div>
+                  <div className="import-category-items">
+                    {categoryGroup.items.map((item) => {
+                      const imported = importedIds.has(item.id);
+                      const checked = selected.includes(item.id);
+                      return (
+                        <label className={`import-task-option${imported ? ' imported' : ''}`} key={item.id}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={imported || importItems.isPending}
+                            onChange={(event) =>
+                              setSelected((current) =>
+                                event.target.checked
+                                  ? [...current, item.id]
+                                  : current.filter((itemId) => itemId !== item.id)
+                              )
+                            }
+                          />
+                          <span className="import-task-content">{summarizeMarkdown(item.contentMd)}</span>
+                          <span className={`import-section-badge section-${item.type}`}>
+                            {sectionLabels[item.type]}
+                          </span>
+                          <span className="import-task-status">{imported ? '已引入' : '推进中'}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </section>
+          ))
+        )}
+      </div>
+      {importItems.error && (
+        <div className="form-error" role="alert">
+          引入失败：{importItems.error.message}
+        </div>
+      )}
+      <div className="dialog-actions">
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => onOpenChange(false)}
+          disabled={importItems.isPending}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => importItems.mutate()}
+          disabled={!selected.length || importItems.isPending}
+        >
+          {importItems.isPending ? '引入中…' : `引入 ${selected.length} 条`}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function summarizeMarkdown(content: string) {
   return stripMarkdownImages(content)
     .replace(/[#*_`>]/g, '')
@@ -1133,7 +1392,8 @@ function ReportItemRow({
   sequence,
   projects,
   categories,
-  onCreateCategory
+  onCreateCategory,
+  onImport
 }: {
   item: ReportItem;
   report: WeeklyReport;
@@ -1141,6 +1401,7 @@ function ReportItemRow({
   projects: Project[];
   categories: ReportCategory[];
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+  onImport: () => void;
 }) {
   const qc = useQueryClient();
   const [initialMeta] = useState(() => readInitialItemMeta(item));
@@ -1383,6 +1644,14 @@ function ReportItemRow({
           {(status === 'error' || status === 'conflict') && (
             <span className={`save-status ${status}`}>{status === 'conflict' ? '冲突' : '保存失败'}</span>
           )}
+          <button
+            className="icon-button import-item"
+            onClick={onImport}
+            aria-label="引入上周任务"
+            title="从上周引入任务"
+          >
+            <Download size={15} />
+          </button>
           <button
             className="icon-button danger"
             onClick={() => {

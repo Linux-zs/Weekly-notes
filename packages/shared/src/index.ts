@@ -61,6 +61,7 @@ export interface ReportCategory {
 export interface ReportItem {
   id: string;
   reportId: string;
+  importedFromItemId: string | null;
   projectId: string | null;
   categoryId: string | null;
   type: ReportItemType;

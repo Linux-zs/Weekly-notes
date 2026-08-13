@@ -262,7 +262,7 @@ export async function registerSettings(app: FastifyInstance) {
         .all(workspaceId, user.id),
       reportItems: sqlite
         .prepare(
-          'SELECT ri.id,ri.report_id AS reportId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
+          'SELECT ri.id,ri.report_id AS reportId,ri.imported_from_item_id AS importedFromItemId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
         )
         .all(workspaceId, user.id),
       attachments: sqlite

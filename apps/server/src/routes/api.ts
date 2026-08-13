@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { reportItemInputSchema, reportItemTypes } from '@zhoubao/shared';
+import { reportCategoryInputSchema, reportItemInputSchema, reportItemTypes } from '@zhoubao/shared';
 import type { ReportItemProgress, ReportItemType } from '@zhoubao/shared';
 import { z } from 'zod';
 import { id, now, sqlite } from '../db/index.js';
 import { requireUser } from '../types.js';
 import type { CurrentUser } from '../types.js';
-import { isoWeekRange } from '../lib/week.js';
+import { isoWeekForDate, isoWeekRange } from '../lib/week.js';
 import { detectImage } from '../lib/image.js';
 import { config } from '../config.js';
 
@@ -17,6 +17,16 @@ const weekParams = z.object({
   week: z.coerce.number().int().min(1).max(53)
 });
 const expectedVersion = z.object({ expectedVersion: z.number().int().positive() });
+const categoryWithItemInput = reportCategoryInputSchema.extend({
+  projectId: z.string().uuid().nullable(),
+  type: z.enum(reportItemTypes)
+});
+const importPreviousItemsInput = z.object({
+  sources: z
+    .array(z.object({ itemId: z.string().uuid(), expectedVersion: z.number().int().positive() }))
+    .min(1)
+    .max(200)
+});
 
 interface WeeklyReportRow {
   id: string;
@@ -27,6 +37,8 @@ interface ReportItemRow {
   id: string;
   reportId?: string;
   report_id?: string;
+  importedFromItemId?: string | null;
+  imported_from_item_id?: string | null;
   projectId?: string | null;
   project_id?: string | null;
   categoryId?: string | null;
@@ -74,6 +86,7 @@ function serializeReportItem(row: ReportItemRow) {
   return {
     id: row.id,
     reportId: row.reportId ?? row.report_id,
+    importedFromItemId: row.importedFromItemId ?? row.imported_from_item_id ?? null,
     projectId: row.projectId ?? row.project_id ?? null,
     categoryId: row.categoryId ?? row.category_id ?? null,
     type: row.type,
@@ -85,6 +98,15 @@ function serializeReportItem(row: ReportItemRow) {
     version: row.version,
     tags: loadTagsFor(row.id)
   };
+}
+
+const normalizeCategoryName = (name: string) => name.normalize('NFKC').toLocaleLowerCase('zh-CN');
+
+function previousIsoWeek(weekYear: number, weekNumber: number) {
+  const { weekStart } = isoWeekRange(weekYear, weekNumber);
+  const date = new Date(`${weekStart}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 7);
+  return isoWeekForDate(date.toISOString().slice(0, 10));
 }
 
 function validProjectId(projectId: string | null, workspaceId: string) {
@@ -149,7 +171,7 @@ function serializeReport(user: CurrentUser, weekYear: number, weekNumber: number
     ? (
         sqlite
           .prepare(
-            `SELECT id,report_id AS reportId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE report_id=? ORDER BY type,position,created_at`
+            `SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE report_id=? ORDER BY type,position,created_at`
           )
           .all(report.id) as ReportItemRow[]
       ).map(serializeReportItem)
@@ -201,6 +223,202 @@ export async function registerApi(app: FastifyInstance) {
     ensureReport(request.currentUser!.workspaceId, request.currentUser!.id, p.year, p.week);
     return serializeReport(request.currentUser!, p.year, p.week);
   });
+  app.post('/api/reports/:id/categories', { preHandler: requireUser }, async (request, reply) => {
+    const { id: reportId } = uuidParam.parse(request.params);
+    const input = categoryWithItemInput.parse(request.body);
+    const user = request.currentUser!;
+    const report = sqlite
+      .prepare('SELECT id FROM weekly_reports WHERE id=? AND workspace_id=? AND author_id=?')
+      .get(reportId, user.workspaceId, user.id);
+    if (!report) return reply.code(404).send({ error: 'NOT_FOUND' });
+    if (!validProjectId(input.projectId, user.workspaceId))
+      return reply.code(400).send({ error: 'INVALID_PROJECT', message: '项目不可用' });
+    const categoryId = id();
+    const itemId = id();
+    const timestamp = now();
+    const categoryPosition = (
+      sqlite
+        .prepare(
+          'SELECT COALESCE(MAX(position),-1)+1 AS position FROM report_categories WHERE workspace_id=?'
+        )
+        .get(user.workspaceId) as { position: number }
+    ).position;
+    const itemPosition = (
+      sqlite
+        .prepare(
+          'SELECT COALESCE(MAX(position),-1)+1 AS position FROM report_items WHERE report_id=? AND type=?'
+        )
+        .get(reportId, input.type) as { position: number }
+    ).position;
+    const progress: ReportItemProgress = input.type === 'completed' ? 'completed' : 'incomplete';
+    try {
+      sqlite.transaction(() => {
+        sqlite
+          .prepare(
+            'INSERT INTO report_categories(id,workspace_id,name,normalized_name,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?)'
+          )
+          .run(
+            categoryId,
+            user.workspaceId,
+            input.name,
+            normalizeCategoryName(input.name),
+            categoryPosition,
+            timestamp,
+            timestamp
+          );
+        sqlite
+          .prepare(
+            'INSERT INTO report_items(id,report_id,project_id,category_id,type,content_md,occurred_on,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)'
+          )
+          .run(
+            itemId,
+            reportId,
+            input.projectId,
+            categoryId,
+            input.type,
+            '',
+            null,
+            progress,
+            '',
+            itemPosition,
+            1,
+            timestamp,
+            timestamp
+          );
+        sqlite
+          .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
+          .run(timestamp, reportId);
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('UNIQUE'))
+        return reply.code(409).send({ error: 'CATEGORY_EXISTS', message: '分类已存在' });
+      throw error;
+    }
+    return reply.code(201).send({
+      category: { id: categoryId, name: input.name, position: categoryPosition, archivedAt: null },
+      item: {
+        id: itemId,
+        reportId,
+        importedFromItemId: null,
+        projectId: input.projectId,
+        categoryId,
+        type: input.type,
+        contentMd: '',
+        occurredOn: null,
+        progress,
+        note: '',
+        position: itemPosition,
+        version: 1,
+        tags: []
+      }
+    });
+  });
+  app.post('/api/reports/:year/:week/import-items', { preHandler: requireUser }, async (request, reply) => {
+    const target = weekParams.parse(request.params);
+    const body = importPreviousItemsInput.parse(request.body);
+    const user = request.currentUser!;
+    const sourceIds = body.sources.map((source) => source.itemId);
+    if (new Set(sourceIds).size !== sourceIds.length)
+      return reply.code(400).send({ error: 'DUPLICATE_IMPORT_SOURCE' });
+    const sourceWeek = previousIsoWeek(target.year, target.week);
+    const sourceReport = sqlite
+      .prepare(
+        'SELECT id FROM weekly_reports WHERE workspace_id=? AND author_id=? AND week_year=? AND week_number=?'
+      )
+      .get(user.workspaceId, user.id, sourceWeek.weekYear, sourceWeek.weekNumber) as
+      { id: string } | undefined;
+    if (!sourceReport) return reply.code(400).send({ error: 'INVALID_IMPORT_SOURCE' });
+    const placeholders = sourceIds.map(() => '?').join(',');
+    const rows = sqlite
+      .prepare(
+        `SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version
+         FROM report_items WHERE report_id=? AND id IN (${placeholders})`
+      )
+      .all(sourceReport.id, ...sourceIds) as ReportItemRow[];
+    if (rows.length !== body.sources.length) return reply.code(400).send({ error: 'INVALID_IMPORT_SOURCE' });
+    const requestById = new Map(body.sources.map((source) => [source.itemId, source]));
+    const versionConflict = rows.find((row) => row.version !== requestById.get(row.id)?.expectedVersion);
+    if (versionConflict)
+      return reply.code(409).send({ error: 'IMPORT_SOURCE_CONFLICT', itemId: versionConflict.id });
+    if (rows.some((row) => row.progress !== 'incomplete' || !(row.contentMd ?? row.content_md ?? '').trim()))
+      return reply.code(400).send({ error: 'INVALID_IMPORT_SOURCE' });
+    const sourceById = new Map(rows.map((row) => [row.id, row]));
+    const orderedSources = sourceIds.map((sourceId) => sourceById.get(sourceId)!);
+    const existingTarget = sqlite
+      .prepare(
+        'SELECT id FROM weekly_reports WHERE workspace_id=? AND author_id=? AND week_year=? AND week_number=?'
+      )
+      .get(user.workspaceId, user.id, target.year, target.week) as { id: string } | undefined;
+    if (existingTarget) {
+      const duplicate = sqlite
+        .prepare(
+          `SELECT imported_from_item_id AS sourceId FROM report_items WHERE report_id=? AND imported_from_item_id IN (${placeholders}) LIMIT 1`
+        )
+        .get(existingTarget.id, ...sourceIds) as { sourceId: string } | undefined;
+      if (duplicate) return reply.code(409).send({ error: 'ALREADY_IMPORTED', itemId: duplicate.sourceId });
+    }
+    const timestamp = now();
+    const createdIds: string[] = [];
+    try {
+      sqlite.transaction(() => {
+        const targetReport = ensureReport(user.workspaceId, user.id, target.year, target.week);
+        const positions = new Map<ReportItemType, number>();
+        reportItemTypes.forEach((type) => {
+          const next = sqlite
+            .prepare(
+              'SELECT COALESCE(MAX(position),-1)+1 AS position FROM report_items WHERE report_id=? AND type=?'
+            )
+            .get(targetReport.id, type) as { position: number };
+          positions.set(type, next.position);
+        });
+        const insertItem = sqlite.prepare(
+          'INSERT INTO report_items(id,report_id,imported_from_item_id,project_id,category_id,type,content_md,occurred_on,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        const copyTags = sqlite.prepare(
+          'INSERT INTO report_item_tags(report_item_id,tag_id) SELECT ?,tag_id FROM report_item_tags WHERE report_item_id=?'
+        );
+        orderedSources.forEach((source) => {
+          const itemId = id();
+          const position = positions.get(source.type) ?? 0;
+          insertItem.run(
+            itemId,
+            targetReport.id,
+            source.id,
+            source.projectId ?? source.project_id ?? null,
+            source.categoryId ?? source.category_id ?? null,
+            source.type,
+            source.contentMd ?? source.content_md ?? '',
+            null,
+            'incomplete',
+            source.note ?? '',
+            position,
+            1,
+            timestamp,
+            timestamp
+          );
+          copyTags.run(itemId, source.id);
+          positions.set(source.type, position + 1);
+          createdIds.push(itemId);
+        });
+        sqlite
+          .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
+          .run(timestamp, targetReport.id);
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('UNIQUE'))
+        return reply.code(409).send({ error: 'ALREADY_IMPORTED' });
+      throw error;
+    }
+    const created = createdIds.map((itemId) => {
+      const row = sqlite
+        .prepare(
+          'SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
+        )
+        .get(itemId) as ReportItemRow;
+      return serializeReportItem(row);
+    });
+    return reply.code(201).send({ items: created });
+  });
   app.post('/api/reports/:id/items', { preHandler: requireUser }, async (request, reply) => {
     const { id: reportId } = uuidParam.parse(request.params);
     const input = reportItemInputSchema.parse(request.body);
@@ -251,6 +469,7 @@ export async function registerApi(app: FastifyInstance) {
     return reply.code(201).send({
       id: itemId,
       reportId,
+      importedFromItemId: null,
       projectId: input.projectId ?? null,
       categoryId: input.categoryId ?? null,
       type: input.type,
@@ -314,7 +533,7 @@ export async function registerApi(app: FastifyInstance) {
     })();
     const row = sqlite
       .prepare(
-        'SELECT id,report_id AS reportId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
+        'SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
       )
       .get(itemId) as ReportItemRow;
     return serializeReportItem(row);
@@ -514,7 +733,7 @@ export async function registerApi(app: FastifyInstance) {
     const movedItem = body.move
       ? (sqlite
           .prepare(
-            'SELECT id,report_id AS reportId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
+            'SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
           )
           .get(body.move.itemId) as ReportItemRow)
       : null;
