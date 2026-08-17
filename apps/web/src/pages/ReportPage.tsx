@@ -35,6 +35,7 @@ import {
   Copy,
   Download,
   GripVertical,
+  Image as ImageIcon,
   ImagePlus,
   Pencil,
   Plus,
@@ -48,6 +49,7 @@ import { ErrorState, Loading, Modal, TagField } from '../components';
 import {
   addDays,
   formatDate,
+  hasMarkdownImage,
   isoWeekForDate,
   Markdown,
   attachmentImageWidth,
@@ -1611,7 +1613,14 @@ function ReportItemRow({
               onClick={singleClick}
               onDoubleClick={doubleClick}
             >
-              {displayContent}
+              <span className="row-content-text">
+                <span>{displayContent}</span>
+              </span>
+              {hasMarkdownImage(content) && (
+                <span className="row-image-indicator" role="img" aria-label="包含图片" title="包含图片">
+                  <ImageIcon size={14} />
+                </span>
+              )}
             </button>
           )}
         </div>

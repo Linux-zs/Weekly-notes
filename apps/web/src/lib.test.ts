@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addDays,
   attachmentImageWidth,
+  hasMarkdownImage,
   isoWeekForDate,
   setAttachmentImageWidth,
   stripMarkdownImages,
@@ -22,6 +23,13 @@ describe('weekly date helpers', () => {
   });
   it('removes image markup from report summaries', () => {
     expect(stripMarkdownImages('完成登录。\n\n![示意图](/api/attachments/demo)')).toBe('完成登录。\n\n');
+  });
+  it('detects rendered images without treating ordinary links as images', () => {
+    expect(hasMarkdownImage('![示意图](/api/attachments/demo)')).toBe(true);
+    expect(hasMarkdownImage('<img src="/api/attachments/demo" alt="示意图">')).toBe(true);
+    expect(hasMarkdownImage('[查看附件](/api/attachments/demo)')).toBe(false);
+    expect(hasMarkdownImage('仅有文字')).toBe(false);
+    expect(hasMarkdownImage('')).toBe(false);
   });
   it('persists a bounded display width in attachment image markup', () => {
     const content = '![示意图](/api/attachments/abc)';

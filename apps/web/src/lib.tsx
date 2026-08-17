@@ -18,6 +18,10 @@ export function stripMarkdownImages(content: string) {
   return content.replace(markdownImagePattern, '').replace(/<img\b[^>]*>/gi, '');
 }
 
+export function hasMarkdownImage(content: string) {
+  return stripMarkdownImages(content) !== content;
+}
+
 export function attachmentImageWidth(content: string, attachmentId: string) {
   const source = `/api/attachments/${attachmentId}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = content.match(new RegExp(`${source}(?:#w=(\\d{1,3}))?`));
