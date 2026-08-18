@@ -134,7 +134,7 @@ function SettingsContent({
   const [workspaceName, setWorkspaceName] = useState(settings.workspace.name);
   const [inviteEmail, setInviteEmail] = useState('');
   const [removeMember, setRemoveMember] = useState<SettingsData['members'][number] | null>(null);
-  const [unlinkProvider, setUnlinkProvider] = useState<string | null>(null);
+  const [unlinkAccount, setUnlinkAccount] = useState<Account | null>(null);
   const [editTag, setEditTag] = useState<Tag | null>(null);
   const [createTagOpen, setCreateTagOpen] = useState(false);
   const [deleteTagTarget, setDeleteTagTarget] = useState<Tag | null>(null);
@@ -195,9 +195,9 @@ function SettingsContent({
     }
   });
   const unlink = useMutation({
-    mutationFn: (provider: string) => api(`/api/auth/accounts/${provider}`, { method: 'DELETE' }),
+    mutationFn: (accountId: string) => api(`/api/auth/accounts/${accountId}`, { method: 'DELETE' }),
     onSuccess: () => {
-      setUnlinkProvider(null);
+      setUnlinkAccount(null);
       qc.invalidateQueries({ queryKey: ['accounts'] });
     }
   });
@@ -503,9 +503,42 @@ function SettingsContent({
             </div>
           </div>
           <div className="account-list">
-            {providers.map((provider) => {
-              const account = accounts.find((item) => item.provider === provider.provider);
+            {accounts.map((account) => {
+              const provider = providers.find((item) => item.provider === account.provider);
               return (
+                <div className="account-row" key={account.id}>
+                  <span className={`provider-icon ${account.provider}`}>
+                    {account.provider === 'google'
+                      ? 'G'
+                      : account.provider === 'microsoft'
+                        ? '⊞'
+                        : account.provider === 'github'
+                          ? 'GH'
+                          : '●'}
+                  </span>
+                  <div>
+                    <strong>{names[account.provider]}</strong>
+                    <span>
+                      {(account.email ?? account.displayName ?? '已绑定') +
+                        (account.lastLoginAt
+                          ? ` · 最近登录 ${new Date(account.lastLoginAt).toLocaleDateString('zh-CN')}`
+                          : '')}
+                    </span>
+                  </div>
+                  <button
+                    className="button secondary danger-text"
+                    disabled={accounts.length === 1}
+                    onClick={() => setUnlinkAccount(account)}
+                  >
+                    <Unlink size={15} />
+                    解绑
+                  </button>
+                </div>
+              );
+            })}
+            {providers
+              .filter((provider) => !accounts.some((account) => account.provider === provider.provider))
+              .map((provider) => (
                 <div className="account-row" key={provider.provider}>
                   <span className={`provider-icon ${provider.provider}`}>
                     {provider.provider === 'google'
@@ -518,27 +551,9 @@ function SettingsContent({
                   </span>
                   <div>
                     <strong>{names[provider.provider]}</strong>
-                    <span>
-                      {account
-                        ? (account.email ?? account.displayName ?? '已绑定') +
-                          (account.lastLoginAt
-                            ? ` · 最近登录 ${new Date(account.lastLoginAt).toLocaleDateString('zh-CN')}`
-                            : '')
-                        : provider.enabled
-                          ? '尚未绑定'
-                          : '尚未配置'}
-                    </span>
+                    <span>{provider.enabled ? '尚未绑定' : '尚未配置'}</span>
                   </div>
-                  {account ? (
-                    <button
-                      className="button secondary danger-text"
-                      disabled={accounts.length === 1}
-                      onClick={() => setUnlinkProvider(provider.provider)}
-                    >
-                      <Unlink size={15} />
-                      解绑
-                    </button>
-                  ) : provider.enabled ? (
+                  {provider.enabled ? (
                     <a className="button secondary" href={`/api/auth/accounts/${provider.provider}/link`}>
                       <Link2 size={15} />
                       绑定
@@ -547,8 +562,7 @@ function SettingsContent({
                     <span className="status-badge">不可用</span>
                   )}
                 </div>
-              );
-            })}
+              ))}
           </div>
         </section>
         <section className="settings-card vertical settings-data">
@@ -706,24 +720,24 @@ function SettingsContent({
           </div>
         </section>
       </div>
-      {unlinkProvider && (
+      {unlinkAccount && (
         <Modal
           open
           onOpenChange={(open) => {
-            if (!open && !unlink.isPending) setUnlinkProvider(null);
+            if (!open && !unlink.isPending) setUnlinkAccount(null);
           }}
           title="解绑登录方式"
-          description={`确认解绑 ${names[unlinkProvider]}？`}
+          description={`确认解绑 ${names[unlinkAccount.provider]}？`}
         >
           <p className="dialog-copy">解绑后将不能再使用该平台登录当前空间。</p>
           {unlink.error && <div className="delete-error">{unlink.error.message}</div>}
           <div className="dialog-actions">
-            <button className="button secondary" onClick={() => setUnlinkProvider(null)}>
+            <button className="button secondary" onClick={() => setUnlinkAccount(null)}>
               取消
             </button>
             <button
               className="button destructive"
-              onClick={() => unlink.mutate(unlinkProvider)}
+              onClick={() => unlink.mutate(unlinkAccount.id)}
               disabled={unlink.isPending}
             >
               {unlink.isPending ? '解绑中…' : '确认解绑'}

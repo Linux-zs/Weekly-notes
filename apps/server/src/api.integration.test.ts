@@ -167,6 +167,53 @@ describe('authenticated weekly report workflow', () => {
     expect(membership).toEqual({ role: 'owner', type: 'personal' });
   });
 
+  it('unlinks exactly one owned authentication account by account id', async () => {
+    const me = await app.inject({ method: 'GET', url: '/api/me', headers: headers() });
+    const userId = me.json().user.id as string;
+    const firstId = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    const insert = sqlite.prepare(
+      'INSERT INTO auth_accounts(id,user_id,provider,subject,email,display_name,last_login_at,created_at) VALUES(?,?,?,?,?,?,?,?)'
+    );
+    insert.run(
+      firstId,
+      userId,
+      'microsoft',
+      `subject-${firstId}`,
+      'one@example.com',
+      'One',
+      timestamp,
+      timestamp
+    );
+    insert.run(
+      secondId,
+      userId,
+      'microsoft',
+      `subject-${secondId}`,
+      'two@example.com',
+      'Two',
+      timestamp,
+      timestamp
+    );
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/auth/accounts/${firstId}`,
+      headers: headers()
+    });
+    expect(response.statusCode).toBe(204);
+    expect(sqlite.prepare('SELECT 1 FROM auth_accounts WHERE id=?').get(firstId)).toBeUndefined();
+    expect(sqlite.prepare('SELECT 1 FROM auth_accounts WHERE id=?').get(secondId)).toBeTruthy();
+
+    const missing = await app.inject({
+      method: 'DELETE',
+      url: `/api/auth/accounts/${crypto.randomUUID()}`,
+      headers: headers()
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
   it('does not retain the removed work material storage or API', async () => {
     const retiredTables = sqlite
       .prepare(

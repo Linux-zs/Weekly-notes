@@ -5,6 +5,7 @@ import { SignJWT, decodeJwt, importPKCS8 } from 'jose';
 import { config } from './config.js';
 import { id, now, sqlite } from './db/index.js';
 import type { AuthProvider } from '@zhoubao/shared';
+import { z } from 'zod';
 
 const FLOW_COOKIE = 'zhoubao_auth_flow';
 const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
@@ -469,17 +470,21 @@ export async function registerAuth(app: FastifyInstance) {
     });
   }
 
-  app.delete('/api/auth/accounts/:provider', async (request, reply) => {
+  app.delete('/api/auth/accounts/:id', async (request, reply) => {
     if (!request.currentUser) return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const provider = (request.params as { provider: string }).provider;
+    const { id: accountId } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const account = sqlite
+      .prepare('SELECT id FROM auth_accounts WHERE id=? AND user_id=?')
+      .get(accountId, request.currentUser.id);
+    if (!account) return reply.code(404).send({ error: 'NOT_FOUND' });
     const count = sqlite
       .prepare('SELECT COUNT(*) AS count FROM auth_accounts WHERE user_id=?')
       .get(request.currentUser.id) as { count: number };
     if (count.count <= 1)
       return reply.code(409).send({ error: 'LAST_ACCOUNT', message: '不能解绑最后一个登录方式' });
     sqlite
-      .prepare('DELETE FROM auth_accounts WHERE user_id=? AND provider=?')
-      .run(request.currentUser.id, provider);
+      .prepare('DELETE FROM auth_accounts WHERE id=? AND user_id=?')
+      .run(accountId, request.currentUser.id);
     return reply.code(204).send();
   });
 
