@@ -8,6 +8,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
+import { ZodError } from 'zod';
 import { config, workspaceRoot } from './config.js';
 import { sqlite } from './db/index.js';
 import { registerAuth } from './auth.js';
@@ -19,6 +20,22 @@ export async function buildApp() {
   const app = Fastify({
     logger: { level: config.NODE_ENV === 'test' ? 'silent' : 'info' },
     trustProxy: config.trustProxy
+  });
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof ZodError)
+      return reply.code(400).send({
+        error: 'VALIDATION_ERROR',
+        message: '请求参数不正确',
+        issues: error.issues.map((issue) => ({ path: issue.path, code: issue.code, message: issue.message }))
+      });
+    const httpError = error as { statusCode?: number; code?: string; message?: string };
+    if (httpError.statusCode && httpError.statusCode >= 400 && httpError.statusCode < 500)
+      return reply.code(httpError.statusCode).send({
+        error: httpError.code || 'REQUEST_ERROR',
+        message: httpError.message || '请求失败'
+      });
+    request.log.error({ err: error }, 'Unhandled request error');
+    return reply.code(500).send({ error: 'INTERNAL_SERVER_ERROR', message: '服务器内部错误' });
   });
   await app.register(cookie);
   await app.register(formbody);

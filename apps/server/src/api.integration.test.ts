@@ -43,6 +43,19 @@ function listFiles(root: string): string[] {
 }
 
 describe('authenticated weekly report workflow', () => {
+  it('returns a structured 400 response for invalid request payloads', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: headers(),
+      payload: {}
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: 'VALIDATION_ERROR', message: '请求参数不正确' });
+    expect(response.json().issues).toEqual(expect.any(Array));
+  });
+
   it('provisions an uninvited external identity with a personal workspace', async () => {
     const { provisionLoginIdentity } = await import('./auth.js');
     const subject = `microsoft-${crypto.randomUUID()}`;
