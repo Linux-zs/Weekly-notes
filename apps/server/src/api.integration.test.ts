@@ -81,6 +81,42 @@ describe('authenticated weekly report workflow', () => {
     expect(after.count).toBe(before.count + 1);
   });
 
+  it('repairs an existing account that no longer belongs to any workspace', async () => {
+    const { provisionLoginIdentity } = await import('./auth.js');
+    const subject = `orphan-${crypto.randomUUID()}`;
+    const first = provisionLoginIdentity(
+      {
+        subject,
+        email: 'orphan@example.com',
+        emailVerified: true,
+        displayName: '失去空间的用户',
+        avatarUrl: null
+      },
+      'google'
+    );
+    sqlite.prepare('DELETE FROM workspace_members WHERE user_id=?').run(first.userId);
+
+    const restored = provisionLoginIdentity(
+      {
+        subject,
+        email: 'orphan@example.com',
+        emailVerified: true,
+        displayName: '失去空间的用户',
+        avatarUrl: null
+      },
+      'google'
+    );
+    const membership = sqlite
+      .prepare(
+        'SELECT wm.role,w.type FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id WHERE wm.user_id=?'
+      )
+      .get(first.userId);
+
+    expect(restored.userId).toBe(first.userId);
+    expect(restored.sessionWorkspaceId).toBeUndefined();
+    expect(membership).toEqual({ role: 'owner', type: 'personal' });
+  });
+
   it('does not retain the removed work material storage or API', async () => {
     const retiredTables = sqlite
       .prepare(

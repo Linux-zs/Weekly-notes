@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { id, now, sqlite } from '../db/index.js';
 import { detectImage } from '../lib/image.js';
 import { requireUser } from '../types.js';
+import { ensureWorkspaceForUser } from '../auth.js';
 
 function validateTimezone(value: string) {
   try {
@@ -223,12 +224,15 @@ export async function registerSettings(app: FastifyInstance) {
     if (!member) return reply.code(404).send({ error: 'NOT_FOUND' });
     if (member.role === 'owner')
       return reply.code(409).send({ error: 'OWNER_REQUIRED', message: '不能移除空间所有者' });
-    sqlite
-      .prepare('DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?')
-      .run(user.workspaceId, memberId);
-    sqlite
-      .prepare('UPDATE sessions SET workspace_id=NULL WHERE user_id=? AND workspace_id=?')
-      .run(memberId, user.workspaceId);
+    sqlite.transaction(() => {
+      sqlite
+        .prepare('DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?')
+        .run(user.workspaceId, memberId);
+      sqlite
+        .prepare('UPDATE sessions SET workspace_id=NULL WHERE user_id=? AND workspace_id=?')
+        .run(memberId, user.workspaceId);
+      ensureWorkspaceForUser(memberId);
+    })();
     return reply.code(204).send();
   });
   app.get('/api/settings/export', { preHandler: requireUser }, async (request, reply) => {

@@ -75,7 +75,7 @@ function createSession(reply: FastifyReply, userId: string, workspaceId?: string
   const raw = randomToken();
   const timestamp = now();
   const expires = new Date(Date.now() + config.SESSION_TTL_DAYS * 86_400_000);
-  const selectedWorkspace =
+  let selectedWorkspace =
     workspaceId ??
     (
       sqlite
@@ -84,13 +84,41 @@ function createSession(reply: FastifyReply, userId: string, workspaceId?: string
         )
         .get(userId) as { workspaceId: string } | undefined
     )?.workspaceId;
-  if (!selectedWorkspace) throw new Error('账号尚未加入任何空间');
+  if (!selectedWorkspace) selectedWorkspace = ensureWorkspaceForUser(userId);
   sqlite
     .prepare(
       'INSERT INTO sessions(id,user_id,workspace_id,token_hash,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?)'
     )
     .run(id(), userId, selectedWorkspace, sha256(raw), expires.toISOString(), timestamp, timestamp);
   reply.setCookie(config.SESSION_COOKIE_NAME, raw, { ...cookieOptions('/'), expires });
+}
+
+export function ensureWorkspaceForUser(userId: string) {
+  let membership = sqlite
+    .prepare(
+      'SELECT workspace_id AS workspaceId FROM workspace_members WHERE user_id=? ORDER BY created_at LIMIT 1'
+    )
+    .get(userId) as { workspaceId: string } | undefined;
+  if (!membership) {
+    const workspaceId = id();
+    const timestamp = now();
+    sqlite
+      .prepare('INSERT INTO workspaces(id,name,type,created_at,updated_at) VALUES(?,?,?,?,?)')
+      .run(workspaceId, '我的周报', 'personal', timestamp, timestamp);
+    sqlite
+      .prepare('INSERT INTO workspace_members(workspace_id,user_id,role,created_at) VALUES(?,?,?,?)')
+      .run(workspaceId, userId, 'owner', timestamp);
+    membership = { workspaceId };
+  }
+  sqlite
+    .prepare(
+      `UPDATE sessions SET workspace_id=? WHERE user_id=? AND
+       (workspace_id IS NULL OR NOT EXISTS (
+         SELECT 1 FROM workspace_members wm WHERE wm.user_id=sessions.user_id AND wm.workspace_id=sessions.workspace_id
+       ))`
+    )
+    .run(membership.workspaceId, userId);
+  return membership.workspaceId;
 }
 
 function createPersonalUser(identity: Identity, provider: AuthProvider) {
@@ -325,6 +353,7 @@ export function provisionLoginIdentity(
     const invitation = identity.emailVerified ? pendingInvitation(identity.email) : undefined;
     if (invitation) sessionWorkspaceId = acceptInvitation(userId, invitation);
   }
+  if (!sessionWorkspaceId) sqlite.transaction(() => ensureWorkspaceForUser(userId!))();
   return { userId, sessionWorkspaceId };
 }
 
@@ -339,7 +368,7 @@ export async function registerAuth(app: FastifyInstance) {
     request.currentUser = null;
     const raw = request.cookies[config.SESSION_COOKIE_NAME];
     if (!raw) return;
-    const row = sqlite
+    let row = sqlite
       .prepare(
         `SELECT u.id,u.display_name,u.email,u.avatar_url,wm.workspace_id,wm.role
       FROM sessions s JOIN users u ON u.id=s.user_id JOIN workspace_members wm ON wm.user_id=u.id AND wm.workspace_id=COALESCE(s.workspace_id,(SELECT workspace_id FROM workspace_members WHERE user_id=u.id ORDER BY created_at LIMIT 1))
@@ -355,6 +384,24 @@ export async function registerAuth(app: FastifyInstance) {
           role: 'owner' | 'member';
         }
       | undefined;
+    if (!row) {
+      const sessionUser = sqlite
+        .prepare(
+          `SELECT u.id,u.display_name,u.email,u.avatar_url
+           FROM sessions s JOIN users u ON u.id=s.user_id
+           WHERE s.token_hash=? AND s.expires_at>?`
+        )
+        .get(sha256(raw), now()) as
+        { id: string; display_name: string; email: string | null; avatar_url: string | null } | undefined;
+      if (sessionUser) {
+        const workspaceId = sqlite.transaction(() => ensureWorkspaceForUser(sessionUser.id))();
+        row = {
+          ...sessionUser,
+          workspace_id: workspaceId,
+          role: 'owner'
+        };
+      }
+    }
     if (!row) return;
     request.currentUser = {
       id: row.id,
