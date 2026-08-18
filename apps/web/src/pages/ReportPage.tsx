@@ -171,18 +171,14 @@ export function ReportPage({ user }: { user: User }) {
   });
   const createProject = useMutation({
     mutationFn: async ({ type, draft }: { type: ReportItemType; draft: ProjectDraft }) => {
-      const project = await api<Project>('/api/projects', {
-        method: 'POST',
-        body: JSON.stringify(draft)
-      });
-      let data = report.data!;
-      if (!data.id)
-        data = await api<WeeklyReport>(`/api/reports/${year}/${week}`, { method: 'PUT', body: '{}' });
-      await api(`/api/reports/${data.id}/items`, {
-        method: 'POST',
-        body: JSON.stringify({ type, projectId: project.id, contentMd: '' })
-      });
-      return project;
+      const result = await api<{ project: Project; items: ReportItem[]; reportVersion: number }>(
+        `/api/reports/${year}/${week}/projects`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ ...draft, type })
+        }
+      );
+      return result.project;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['projects'] });
@@ -865,17 +861,20 @@ function ProjectReportGroup({
         await api(`/api/projects/${group.project.id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
         return;
       }
-      const project = await api<Project>('/api/projects', {
-        method: 'POST',
-        body: JSON.stringify({ name, color: projectColors[projects.length % projectColors.length] })
-      });
-      await Promise.all(
-        group.items.map((item) =>
-          api(`/api/report-items/${item.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ projectId: project.id, expectedVersion: item.version })
+      await api<{ project: Project; items: ReportItem[]; reportVersion: number }>(
+        `/api/reports/${report.weekYear}/${report.weekNumber}/projects`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            color: projectColors[projects.length % projectColors.length],
+            type,
+            assignments: group.items.map((item) => ({
+              itemId: item.id,
+              expectedVersion: item.version
+            }))
           })
-        )
+        }
       );
     },
     onSuccess: () => {
@@ -1444,7 +1443,9 @@ function ReportItemRow({
   const clickTimer = useRef<number | undefined>(undefined);
   const deferredSave = useRef(createDeferredAction()).current;
   const saveTaskHandler = useRef<(task: ItemSaveTask) => Promise<void>>(async () => undefined);
-  const saveQueue = useRef(createLatestTaskQueue((task: ItemSaveTask) => saveTaskHandler.current(task))).current;
+  const saveQueue = useRef(
+    createLatestTaskQueue((task: ItemSaveTask) => saveTaskHandler.current(task))
+  ).current;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const latestDraft = useRef<ItemDraft>({
@@ -1478,7 +1479,11 @@ function ReportItemRow({
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
 
   useEffect(() => {
-    if (draftRevision.current > acknowledgedRevision.current || saveQueue.isBusy() || deferredSave.hasPending()) {
+    if (
+      draftRevision.current > acknowledgedRevision.current ||
+      saveQueue.isBusy() ||
+      deferredSave.hasPending()
+    ) {
       return;
     }
     setContent(item.contentMd);

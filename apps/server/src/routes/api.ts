@@ -1,7 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { reportCategoryInputSchema, reportItemInputSchema, reportItemTypes } from '@zhoubao/shared';
+import {
+  projectInputSchema,
+  reportCategoryInputSchema,
+  reportItemInputSchema,
+  reportItemTypes
+} from '@zhoubao/shared';
 import type { ReportItemProgress, ReportItemType } from '@zhoubao/shared';
 import { z } from 'zod';
 import { id, now, sqlite } from '../db/index.js';
@@ -20,6 +25,13 @@ const expectedVersion = z.object({ expectedVersion: z.number().int().positive() 
 const categoryWithItemInput = reportCategoryInputSchema.extend({
   projectId: z.string().uuid().nullable(),
   type: z.enum(reportItemTypes)
+});
+const projectWithItemsInput = projectInputSchema.extend({
+  type: z.enum(reportItemTypes),
+  assignments: z
+    .array(z.object({ itemId: z.string().uuid(), expectedVersion: z.number().int().positive() }))
+    .max(500)
+    .optional()
 });
 const importPreviousItemsInput = z.object({
   sources: z
@@ -222,6 +234,123 @@ export async function registerApi(app: FastifyInstance) {
     const p = weekParams.parse(request.params);
     ensureReport(request.currentUser!.workspaceId, request.currentUser!.id, p.year, p.week);
     return serializeReport(request.currentUser!, p.year, p.week);
+  });
+  app.post('/api/reports/:year/:week/projects', { preHandler: requireUser }, async (request, reply) => {
+    const target = weekParams.parse(request.params);
+    const input = projectWithItemsInput.parse(request.body);
+    const assignments = input.assignments ?? [];
+    const assignmentIds = assignments.map((assignment) => assignment.itemId);
+    if (new Set(assignmentIds).size !== assignmentIds.length)
+      return reply.code(400).send({ error: 'DUPLICATE_PROJECT_ASSIGNMENT' });
+    const user = request.currentUser!;
+    const projectId = id();
+    const createdItemIds: string[] = [];
+    const timestamp = now();
+    let projectPosition = 0;
+    let reportVersion = 0;
+    try {
+      sqlite.transaction(() => {
+        const report = ensureReport(user.workspaceId, user.id, target.year, target.week);
+        if (assignments.length) {
+          const placeholders = assignments.map(() => '?').join(',');
+          const assignmentRows = sqlite
+            .prepare(`SELECT * FROM report_items WHERE report_id=? AND id IN (${placeholders}) AND type=?`)
+            .all(report.id, ...assignmentIds, input.type) as ReportItemRow[];
+          if (assignmentRows.length !== assignments.length) throw new Error('INVALID_PROJECT_ASSIGNMENT');
+          const assignmentById = new Map(assignments.map((assignment) => [assignment.itemId, assignment]));
+          const conflict = assignmentRows.find(
+            (row) => row.project_id !== null || row.version !== assignmentById.get(row.id)?.expectedVersion
+          );
+          if (conflict) throw new Error(`PROJECT_ASSIGNMENT_CONFLICT:${conflict.id}`);
+        }
+        projectPosition = (
+          sqlite
+            .prepare('SELECT COALESCE(MAX(position),-1)+1 AS position FROM projects WHERE workspace_id=?')
+            .get(user.workspaceId) as { position: number }
+        ).position;
+        sqlite
+          .prepare(
+            'INSERT INTO projects(id,workspace_id,name,color,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?)'
+          )
+          .run(projectId, user.workspaceId, input.name, input.color, projectPosition, timestamp, timestamp);
+        if (assignments.length) {
+          const updateItem = sqlite.prepare(
+            'UPDATE report_items SET project_id=?,version=version+1,updated_at=? WHERE id=? AND report_id=? AND project_id IS NULL AND version=?'
+          );
+          assignments.forEach((assignment) => {
+            const result = updateItem.run(
+              projectId,
+              timestamp,
+              assignment.itemId,
+              report.id,
+              assignment.expectedVersion
+            );
+            if (!result.changes) throw new Error(`PROJECT_ASSIGNMENT_CONFLICT:${assignment.itemId}`);
+            createdItemIds.push(assignment.itemId);
+          });
+        } else {
+          const itemId = id();
+          const position = (
+            sqlite
+              .prepare(
+                'SELECT COALESCE(MAX(position),-1)+1 AS position FROM report_items WHERE report_id=? AND type=?'
+              )
+              .get(report.id, input.type) as { position: number }
+          ).position;
+          sqlite
+            .prepare(
+              'INSERT INTO report_items(id,report_id,project_id,type,content_md,occurred_on,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)'
+            )
+            .run(
+              itemId,
+              report.id,
+              projectId,
+              input.type,
+              '',
+              null,
+              input.type === 'completed' ? 'completed' : 'incomplete',
+              '',
+              position,
+              1,
+              timestamp,
+              timestamp
+            );
+          createdItemIds.push(itemId);
+        }
+        sqlite
+          .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
+          .run(timestamp, report.id);
+        reportVersion = (
+          sqlite.prepare('SELECT version FROM weekly_reports WHERE id=?').get(report.id) as {
+            version: number;
+          }
+        ).version;
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVALID_PROJECT_ASSIGNMENT')
+        return reply.code(400).send({ error: 'INVALID_PROJECT_ASSIGNMENT' });
+      if (error instanceof Error && error.message.startsWith('PROJECT_ASSIGNMENT_CONFLICT:'))
+        return reply.code(409).send({
+          error: 'PROJECT_ASSIGNMENT_CONFLICT',
+          itemId: error.message.slice('PROJECT_ASSIGNMENT_CONFLICT:'.length)
+        });
+      throw error;
+    }
+    const items = createdItemIds.map((itemId) => {
+      const row = sqlite.prepare('SELECT * FROM report_items WHERE id=?').get(itemId) as ReportItemRow;
+      return serializeReportItem(row);
+    });
+    return reply.code(201).send({
+      project: {
+        id: projectId,
+        name: input.name,
+        color: input.color,
+        position: projectPosition,
+        archivedAt: null
+      },
+      items,
+      reportVersion
+    });
   });
   app.post('/api/reports/:id/categories', { preHandler: requireUser }, async (request, reply) => {
     const { id: reportId } = uuidParam.parse(request.params);

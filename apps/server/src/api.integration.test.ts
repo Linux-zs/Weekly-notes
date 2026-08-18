@@ -219,7 +219,9 @@ describe('authenticated weekly report workflow', () => {
 
   it('does not expose another author report through workspace search', async () => {
     const owner = sqlite
-      .prepare('SELECT workspace_id AS workspaceId,author_id AS authorId FROM weekly_reports ORDER BY created_at LIMIT 1')
+      .prepare(
+        'SELECT workspace_id AS workspaceId,author_id AS authorId FROM weekly_reports ORDER BY created_at LIMIT 1'
+      )
       .get() as { workspaceId: string; authorId: string };
     const otherUserId = crypto.randomUUID();
     const otherReportId = crypto.randomUUID();
@@ -229,7 +231,14 @@ describe('authenticated weekly report workflow', () => {
         .prepare(
           'INSERT INTO users(id,display_name,email,timezone,created_at,updated_at) VALUES(?,?,?,?,?,?)'
         )
-        .run(otherUserId, '同空间其他成员', 'other-author@example.com', 'Asia/Shanghai', timestamp, timestamp);
+        .run(
+          otherUserId,
+          '同空间其他成员',
+          'other-author@example.com',
+          'Asia/Shanghai',
+          timestamp,
+          timestamp
+        );
       sqlite
         .prepare('INSERT INTO workspace_members(workspace_id,user_id,role,created_at) VALUES(?,?,?,?)')
         .run(owner.workspaceId, otherUserId, 'member', timestamp);
@@ -274,6 +283,96 @@ describe('authenticated weekly report workflow', () => {
     });
     expect(search.statusCode).toBe(200);
     expect(search.json().items).toEqual([]);
+  });
+
+  it('creates a project with report items in one transaction', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/reports/2028/10/projects',
+      headers: headers(),
+      payload: { name: '事务首条项目', color: '#456990', type: 'completed' }
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      project: { name: '事务首条项目', color: '#456990', archivedAt: null },
+      items: [{ projectId: created.json().project.id, type: 'completed', contentMd: '', version: 1 }],
+      reportVersion: 2
+    });
+
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2028/11',
+      headers: headers(),
+      payload: {}
+    });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'next_plan', contentMd: '待归属一' }
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'next_plan', contentMd: '待归属二' }
+    });
+    const updatedFirst = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${first.json().id}`,
+      headers: headers(),
+      payload: { note: '制造版本变化', expectedVersion: 1 }
+    });
+    const projectName = `事务批量项目-${crypto.randomUUID()}`;
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/reports/2028/11/projects',
+      headers: headers(),
+      payload: {
+        name: projectName,
+        color: '#61758A',
+        type: 'next_plan',
+        assignments: [
+          { itemId: first.json().id, expectedVersion: 1 },
+          { itemId: second.json().id, expectedVersion: 1 }
+        ]
+      }
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(sqlite.prepare('SELECT id FROM projects WHERE name=?').get(projectName)).toBeUndefined();
+    expect(
+      sqlite
+        .prepare('SELECT project_id AS projectId FROM report_items WHERE id IN (?,?)')
+        .all(first.json().id, second.json().id)
+    ).toEqual([{ projectId: null }, { projectId: null }]);
+
+    const beforeAssignment = await app.inject({
+      method: 'GET',
+      url: '/api/reports/2028/11',
+      headers: headers()
+    });
+    const assigned = await app.inject({
+      method: 'POST',
+      url: '/api/reports/2028/11/projects',
+      headers: headers(),
+      payload: {
+        name: projectName,
+        color: '#61758A',
+        type: 'next_plan',
+        assignments: [
+          { itemId: first.json().id, expectedVersion: updatedFirst.json().version },
+          { itemId: second.json().id, expectedVersion: 1 }
+        ]
+      }
+    });
+    expect(assigned.statusCode).toBe(201);
+    expect(assigned.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: first.json().id, projectId: assigned.json().project.id, version: 3 }),
+        expect.objectContaining({ id: second.json().id, projectId: assigned.json().project.id, version: 2 })
+      ])
+    );
+    expect(assigned.json().reportVersion).toBe(beforeAssignment.json().version + 1);
   });
 
   it('manages categories and moves report items transactionally', async () => {
