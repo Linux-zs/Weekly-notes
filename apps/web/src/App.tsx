@@ -144,7 +144,7 @@ function Avatar({ user }: { user: { displayName: string; avatarUrl: string | nul
   );
 }
 
-function LoginPage() {
+export function LoginPage() {
   const providers = useQuery({
     queryKey: ['providers'],
     queryFn: () =>
