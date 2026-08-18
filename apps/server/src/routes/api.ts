@@ -754,8 +754,8 @@ export async function registerApi(app: FastifyInstance) {
       })
       .parse(request.query);
     const tags = (q.tagIds ?? '').split(',').filter(Boolean);
-    const where = ['wr.workspace_id=?'];
-    const args: Array<string | number> = [request.currentUser!.workspaceId];
+    const where = ['wr.workspace_id=?', 'wr.author_id=?'];
+    const args: Array<string | number> = [request.currentUser!.workspaceId, request.currentUser!.id];
     if (q.q) {
       where.push("ri.content_md LIKE ? ESCAPE '\\'");
       args.push(`%${q.q.replace(/[\\%_]/g, '\\$&')}%`);

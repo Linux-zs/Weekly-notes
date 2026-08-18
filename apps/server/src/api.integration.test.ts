@@ -217,6 +217,65 @@ describe('authenticated weekly report workflow', () => {
     expect(renamedTag.json()).toMatchObject({ name: '已验证', color: '#2F5597' });
   });
 
+  it('does not expose another author report through workspace search', async () => {
+    const owner = sqlite
+      .prepare('SELECT workspace_id AS workspaceId,author_id AS authorId FROM weekly_reports ORDER BY created_at LIMIT 1')
+      .get() as { workspaceId: string; authorId: string };
+    const otherUserId = crypto.randomUUID();
+    const otherReportId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    sqlite.transaction(() => {
+      sqlite
+        .prepare(
+          'INSERT INTO users(id,display_name,email,timezone,created_at,updated_at) VALUES(?,?,?,?,?,?)'
+        )
+        .run(otherUserId, '同空间其他成员', 'other-author@example.com', 'Asia/Shanghai', timestamp, timestamp);
+      sqlite
+        .prepare('INSERT INTO workspace_members(workspace_id,user_id,role,created_at) VALUES(?,?,?,?)')
+        .run(owner.workspaceId, otherUserId, 'member', timestamp);
+      sqlite
+        .prepare(
+          'INSERT INTO weekly_reports(id,workspace_id,author_id,week_year,week_number,week_start,week_end,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)'
+        )
+        .run(
+          otherReportId,
+          owner.workspaceId,
+          otherUserId,
+          2026,
+          34,
+          '2026-08-17',
+          '2026-08-23',
+          1,
+          timestamp,
+          timestamp
+        );
+      sqlite
+        .prepare(
+          'INSERT INTO report_items(id,report_id,type,content_md,progress,note,position,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)'
+        )
+        .run(
+          crypto.randomUUID(),
+          otherReportId,
+          'completed',
+          '仅属于其他作者的保密检索词',
+          'completed',
+          '',
+          0,
+          1,
+          timestamp,
+          timestamp
+        );
+    })();
+
+    const search = await app.inject({
+      method: 'GET',
+      url: `/api/search?q=${encodeURIComponent('保密检索词')}`,
+      headers: headers()
+    });
+    expect(search.statusCode).toBe(200);
+    expect(search.json().items).toEqual([]);
+  });
+
   it('manages categories and moves report items transactionally', async () => {
     const development = await app.inject({
       method: 'POST',
