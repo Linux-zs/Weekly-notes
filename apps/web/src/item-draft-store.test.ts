@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { readItemDraft, readOrMigrateItemDraft, removeItemDraft, writeItemDraft } from './item-draft-store';
+import {
+  createDraftChangeTracker,
+  readItemDraft,
+  readOrMigrateItemDraft,
+  removeItemDraft,
+  writeItemDraft
+} from './item-draft-store';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -12,6 +18,26 @@ function memoryStorage() {
 }
 
 describe('item draft storage', () => {
+  it('does not treat repeated mount effects or acknowledged server state as draft edits', () => {
+    const initial = { contentMd: '服务器正文', tagIds: ['tag'] };
+    const tracker = createDraftChangeTracker(initial);
+
+    expect(tracker.hasChanged(initial)).toBe(false);
+    expect(tracker.hasChanged({ ...initial, tagIds: [...initial.tagIds] })).toBe(false);
+    expect(tracker.hasChanged({ ...initial, contentMd: '本地修改' })).toBe(true);
+    expect(tracker.hasChanged({ ...initial, contentMd: '本地修改' })).toBe(false);
+    tracker.acknowledge({ ...initial, contentMd: '服务器新正文' });
+    expect(tracker.hasChanged({ ...initial, contentMd: '服务器新正文' })).toBe(false);
+  });
+
+  it('queues a recovered draft exactly once', () => {
+    const draft = { contentMd: '恢复的草稿', tagIds: [] as string[] };
+    const tracker = createDraftChangeTracker(draft, true);
+
+    expect(tracker.hasChanged(draft)).toBe(true);
+    expect(tracker.hasChanged(draft)).toBe(false);
+  });
+
   it('round-trips and removes a complete draft snapshot', () => {
     const storage = memoryStorage();
     const snapshot = { serverVersion: 3, revision: 5, draft: { contentMd: '未保存内容' } };

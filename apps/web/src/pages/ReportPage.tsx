@@ -49,6 +49,7 @@ import { ErrorState, Loading, Modal, TagField } from '../components';
 import { createDeferredAction } from '../deferred-action';
 import { createLatestTaskQueue } from '../latest-task-queue';
 import {
+  createDraftChangeTracker,
   readOrMigrateItemDraft,
   removeItemDraft,
   writeItemDraft,
@@ -1506,7 +1507,6 @@ function ReportItemRow({
   const draftRevision = useRef(initialSnapshot?.revision ?? 0);
   const acknowledgedRevision = useRef(0);
   const mounted = useRef(true);
-  const initial = useRef(!initialSnapshot || restoredConflict);
   const skipNextSave = useRef(false);
   const clickTimer = useRef<number | undefined>(undefined);
   const deferredSave = useRef(createDeferredAction()).current;
@@ -1536,6 +1536,9 @@ function ReportItemRow({
     occurredOn: occurredOn || null,
     tagIds
   };
+  const draftChanges = useRef(
+    createDraftChangeTracker(restoredDraft, Boolean(initialSnapshot && !restoredConflict))
+  ).current;
   const persistLatestDraft = (serverVersion = version.current) =>
     writeItemDraft(item.id, {
       serverVersion,
@@ -1560,6 +1563,16 @@ function ReportItemRow({
     ) {
       return;
     }
+    draftChanges.acknowledge({
+      contentMd: item.contentMd,
+      progress: item.progress,
+      note: item.note,
+      projectId: item.projectId,
+      categoryId: item.categoryId,
+      type: item.type,
+      occurredOn: item.occurredOn,
+      tagIds: item.tags.map((tag) => tag.id)
+    });
     setContent(item.contentMd);
     setItemMeta({ progress: item.progress, note: item.note });
     setProjectId(item.projectId ?? '');
@@ -1580,6 +1593,7 @@ function ReportItemRow({
     item.type,
     item.version,
     deferredSave,
+    draftChanges,
     saveQueue
   ]);
   useEffect(() => {
@@ -1640,15 +1654,13 @@ function ReportItemRow({
   const tagKey = tagIds.join(',');
   // The mutation intentionally saves the latest controlled draft after a debounce.
   useEffect(() => {
-    if (initial.current) {
-      initial.current = false;
-      return;
-    }
     if (skipNextSave.current) {
       skipNextSave.current = false;
+      draftChanges.acknowledge(latestDraft.current);
       deferredSave.cancel();
       return;
     }
+    if (!draftChanges.hasChanged(latestDraft.current)) return;
     draftRevision.current += 1;
     persistLatestDraft();
     setStatus('saving');
