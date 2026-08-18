@@ -28,6 +28,10 @@ describe('weekly date helpers', () => {
     expect(hasMarkdownImage('![示意图](/api/attachments/demo)')).toBe(true);
     expect(hasMarkdownImage('<img src="/api/attachments/demo" alt="示意图">')).toBe(true);
     expect(hasMarkdownImage('[查看附件](/api/attachments/demo)')).toBe(false);
+    expect(hasMarkdownImage('`![代码示例](/api/attachments/demo)`')).toBe(false);
+    expect(hasMarkdownImage('```md\n![代码块示例](/api/attachments/demo)\n```')).toBe(false);
+    expect(hasMarkdownImage('\\![转义示例](/api/attachments/demo)')).toBe(false);
+    expect(hasMarkdownImage('`<img src="/api/attachments/demo">`')).toBe(false);
     expect(hasMarkdownImage('仅有文字')).toBe(false);
     expect(hasMarkdownImage('')).toBe(false);
   });

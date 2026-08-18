@@ -19,7 +19,8 @@ export function stripMarkdownImages(content: string) {
 }
 
 export function hasMarkdownImage(content: string) {
-  return stripMarkdownImages(content) !== content;
+  const html = marked.parse(content || '', { async: false }) as string;
+  return /<img\b[^>]*>/i.test(html);
 }
 
 export function attachmentImageWidth(content: string, attachmentId: string) {
