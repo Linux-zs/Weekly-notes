@@ -28,6 +28,29 @@ type Identity = {
   avatarUrl: string | null;
 };
 
+const verifiedClaim = (value: unknown) => value === true || value === 'true';
+const emailClaim = (value: unknown) =>
+  typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value.toLowerCase() : null;
+
+export function identityFromOidcClaims(provider: AuthProvider, claims: Record<string, unknown>): Identity {
+  const verifiedPrimary = provider === 'microsoft' ? emailClaim(claims.verified_primary_email) : null;
+  const reportedEmail = emailClaim(claims.email);
+  const preferredEmail = provider === 'microsoft' ? emailClaim(claims.preferred_username) : null;
+  const email = verifiedPrimary ?? reportedEmail ?? preferredEmail;
+  const emailVerified = Boolean(
+    verifiedPrimary ||
+    (reportedEmail &&
+      (verifiedClaim(claims.email_verified) || (provider === 'microsoft' && verifiedClaim(claims.xms_edov))))
+  );
+  return {
+    subject: String(claims.sub),
+    email,
+    emailVerified,
+    displayName: typeof claims.name === 'string' ? claims.name : email ? email.split('@')[0]! : provider,
+    avatarUrl: typeof claims.picture === 'string' ? claims.picture : null
+  };
+}
+
 function callbackUrl(provider: AuthProvider) {
   return `${config.APP_ORIGIN}/auth/${provider}/callback`;
 }
@@ -307,18 +330,7 @@ async function resolveIdentity(
   });
   if (!tokens.id_token) throw new Error('Provider did not return an ID token');
   const claims = decodeJwt(tokens.id_token);
-  return {
-    subject: String(claims.sub),
-    email: typeof claims.email === 'string' ? claims.email : null,
-    emailVerified: claims.email_verified === true || claims.email_verified === 'true',
-    displayName:
-      typeof claims.name === 'string'
-        ? claims.name
-        : typeof claims.email === 'string'
-          ? claims.email.split('@')[0]!
-          : provider,
-    avatarUrl: typeof claims.picture === 'string' ? claims.picture : null
-  };
+  return identityFromOidcClaims(provider, claims);
 }
 
 export function provisionLoginIdentity(
@@ -331,6 +343,9 @@ export function provisionLoginIdentity(
     .get(provider, identity.subject) as { user_id: string } | undefined;
   let userId = existing?.user_id;
   let sessionWorkspaceId: string | undefined;
+  const pending = pendingInvitation(identity.email);
+  const trustedInvitation = identity.emailVerified ? pending : undefined;
+  const invitationVerificationRequired = Boolean(pending && !identity.emailVerified);
   if (linkUserId) {
     if (existing && existing.user_id !== linkUserId) throw new Error('该身份已绑定其他账号');
     userId = linkUserId;
@@ -340,27 +355,28 @@ export function provisionLoginIdentity(
       VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(provider,subject) DO UPDATE SET last_login_at=excluded.last_login_at,email=excluded.email,display_name=excluded.display_name`
       )
       .run(id(), userId, provider, identity.subject, identity.email, identity.displayName, now(), now());
+    if (trustedInvitation) sessionWorkspaceId = acceptInvitation(userId, trustedInvitation);
   } else if (!userId) {
-    const invitation = identity.emailVerified ? pendingInvitation(identity.email) : undefined;
-    if (invitation) {
-      userId = createInvitedUser(identity, provider, invitation);
-      sessionWorkspaceId = invitation.workspace_id;
+    if (trustedInvitation) {
+      userId = createInvitedUser(identity, provider, trustedInvitation);
+      sessionWorkspaceId = trustedInvitation.workspace_id;
     }
     if (!userId) userId = createPersonalUser(identity, provider);
   } else {
     sqlite
       .prepare('UPDATE auth_accounts SET last_login_at=? WHERE provider=? AND subject=?')
       .run(now(), provider, identity.subject);
-    const invitation = identity.emailVerified ? pendingInvitation(identity.email) : undefined;
-    if (invitation) sessionWorkspaceId = acceptInvitation(userId, invitation);
+    if (trustedInvitation) sessionWorkspaceId = acceptInvitation(userId, trustedInvitation);
   }
   if (!sessionWorkspaceId) sqlite.transaction(() => ensureWorkspaceForUser(userId!))();
-  return { userId, sessionWorkspaceId };
+  return { userId, sessionWorkspaceId, invitationVerificationRequired };
 }
 
 function finishIdentity(identity: Identity, provider: AuthProvider, flow: Flow, reply: FastifyReply) {
-  const { userId, sessionWorkspaceId } = provisionLoginIdentity(identity, provider, flow.link_user_id);
+  const result = provisionLoginIdentity(identity, provider, flow.link_user_id);
+  const { userId, sessionWorkspaceId } = result;
   createSession(reply, userId, sessionWorkspaceId);
+  return result;
 }
 
 export async function registerAuth(app: FastifyInstance) {
@@ -467,10 +483,16 @@ export async function registerAuth(app: FastifyInstance) {
           return reply.code(400).type('text/plain').send('登录流程已过期，请重新开始。');
         try {
           const identity = await resolveIdentity(provider, flow, request);
-          finishIdentity(identity, provider, flow, reply);
+          const result = finishIdentity(identity, provider, flow, reply);
           sqlite.prepare('DELETE FROM auth_flows WHERE id=?').run(flow.id);
           reply.clearCookie(FLOW_COOKIE, cookieOptions('/auth'));
-          return reply.redirect(flow.link_user_id ? '/settings?linked=1' : '/');
+          return reply.redirect(
+            result.invitationVerificationRequired
+              ? '/settings?invite=verification_required'
+              : flow.link_user_id
+                ? '/settings?linked=1'
+                : '/'
+          );
         } catch (error) {
           request.log.warn({ err: error, provider }, 'Authentication callback failed');
           return reply.redirect('/login?error=access_denied');

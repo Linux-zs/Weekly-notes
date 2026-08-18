@@ -53,7 +53,7 @@ https://weekly.example.com/auth/apple/callback
 ```
 
 - Google：创建 Web OAuth Client，只请求 `openid profile email`。
-- Microsoft：应用账号类型选择“任意组织目录和个人 Microsoft 账号”，服务端使用 `common`。
+- Microsoft：应用账号类型选择“任意组织目录和个人 Microsoft 账号”，服务端使用 `common`。如需按邮箱自动接受团队邀请，请在应用的 ID Token 可选声明中配置 `email`、`verified_primary_email` 和 `xms_edov`；普通 `preferred_username` 不作为邀请授权依据。
 - GitHub：创建 OAuth App，只请求 `read:user user:email`。
 - Apple：当前默认关闭。获得 Apple Developer Program 后配置 Services ID、域名、Return URL、Team ID、Key ID 和 ES256 私钥，再设置 `APPLE_ENABLED=true`。
 

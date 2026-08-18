@@ -207,6 +207,80 @@ describe('authenticated weekly report workflow', () => {
     expect(after.count).toBe(before.count + 1);
   });
 
+  it('trusts only verified Microsoft email claims for invitations', async () => {
+    const { identityFromOidcClaims, provisionLoginIdentity } = await import('./auth.js');
+    expect(
+      identityFromOidcClaims('microsoft', {
+        sub: 'verified-primary',
+        email: 'reported@example.com',
+        preferred_username: 'preferred@example.com',
+        verified_primary_email: 'verified@example.com'
+      })
+    ).toMatchObject({ email: 'verified@example.com', emailVerified: true });
+    expect(
+      identityFromOidcClaims('microsoft', {
+        sub: 'domain-verified',
+        email: 'domain@example.com',
+        xms_edov: true
+      })
+    ).toMatchObject({ email: 'domain@example.com', emailVerified: true });
+    expect(
+      identityFromOidcClaims('microsoft', {
+        sub: 'preferred-only',
+        preferred_username: 'candidate@example.com'
+      })
+    ).toMatchObject({ email: 'candidate@example.com', emailVerified: false });
+
+    const me = await app.inject({ method: 'GET', url: '/api/me', headers: headers() });
+    const invitationId = crypto.randomUUID();
+    const invitationEmail = `invite-${crypto.randomUUID().slice(0, 8)}@example.com`;
+    const timestamp = new Date().toISOString();
+    sqlite
+      .prepare(
+        'INSERT INTO workspace_invitations(id,workspace_id,email,role,status,invited_by,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)'
+      )
+      .run(
+        invitationId,
+        me.json().user.workspaceId,
+        invitationEmail,
+        'member',
+        'pending',
+        me.json().user.id,
+        new Date(Date.now() + 86_400_000).toISOString(),
+        timestamp
+      );
+    const microsoft = provisionLoginIdentity(
+      {
+        subject: `microsoft-${invitationId}`,
+        email: invitationEmail,
+        emailVerified: false,
+        displayName: '待验证用户',
+        avatarUrl: null
+      },
+      'microsoft'
+    );
+    expect(microsoft.invitationVerificationRequired).toBe(true);
+    expect(microsoft.sessionWorkspaceId).toBeUndefined();
+
+    const linked = provisionLoginIdentity(
+      {
+        subject: `google-${invitationId}`,
+        email: invitationEmail,
+        emailVerified: true,
+        displayName: '已验证用户',
+        avatarUrl: null
+      },
+      'google',
+      microsoft.userId
+    );
+    expect(linked.sessionWorkspaceId).toBe(me.json().user.workspaceId);
+    expect(
+      sqlite
+        .prepare('SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?')
+        .get(me.json().user.workspaceId, microsoft.userId)
+    ).toBeTruthy();
+  });
+
   it('repairs an existing account that no longer belongs to any workspace', async () => {
     const { provisionLoginIdentity } = await import('./auth.js');
     const subject = `orphan-${crypto.randomUUID()}`;

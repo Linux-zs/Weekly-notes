@@ -282,6 +282,8 @@ function SettingsContent({
     localStorage.setItem('weekly-report:compact', String(value));
     document.documentElement.classList.toggle('compact-ui', value);
   };
+  const invitationVerificationRequired =
+    new URLSearchParams(location.search).get('invite') === 'verification_required';
   return (
     <div className="page">
       <div className="page-heading">
@@ -291,6 +293,11 @@ function SettingsContent({
           <p>管理身份、空间、项目、标签和数据。</p>
         </div>
       </div>
+      {invitationVerificationRequired && (
+        <div className="inline-alert">
+          登录平台没有返回可信的已验证邮箱，因此暂未加入受邀空间。可以绑定另一个已验证相同邮箱的登录方式后重试。
+        </div>
+      )}
       <div className="settings-dashboard">
         <section className="settings-card vertical settings-profile">
           <div className="panel-heading">
