@@ -6,6 +6,7 @@ export const reportItemProgresses = ['completed', 'answered', 'incomplete'] as c
 export type ReportItemProgress = (typeof reportItemProgresses)[number];
 export const authProviders = ['google', 'microsoft', 'github', 'apple'] as const;
 export type AuthProvider = (typeof authProviders)[number];
+export const maxReportItemTags = 20;
 
 export const reportItemInputSchema = z.object({
   projectId: z.string().uuid().nullable().optional(),
@@ -15,7 +16,11 @@ export const reportItemInputSchema = z.object({
   occurredOn: z.iso.date().nullable().optional(),
   progress: z.enum(reportItemProgresses).optional(),
   note: z.string().max(2_000).optional(),
-  tagIds: z.array(z.string().uuid()).max(20).default([]),
+  tagIds: z
+    .array(z.string().uuid())
+    .max(maxReportItemTags)
+    .refine((ids) => new Set(ids).size === ids.length, '标签不能重复')
+    .default([]),
   position: z.number().int().min(0).optional()
 });
 

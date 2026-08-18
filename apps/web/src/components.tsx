@@ -1,8 +1,8 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { Plus, Tag as TagIcon, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Tag } from '@zhoubao/shared';
-import { useState, type ReactNode } from 'react';
+import { maxReportItemTags, type Tag } from '@zhoubao/shared';
+import { useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 
 export function Modal({
@@ -93,6 +93,9 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [color, setColor] = useState(tagColors[0]);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const atLimit = value.length >= maxReportItemTags;
   const tags = useQuery({ queryKey: ['tags'], queryFn: () => api<{ tags: Tag[] }>('/api/tags') });
   const create = useMutation({
     mutationFn: () => api<Tag>('/api/tags', { method: 'POST', body: JSON.stringify({ name, color }) }),
@@ -100,7 +103,7 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
       qc.setQueryData<{ tags: Tag[] }>(['tags'], (old) => ({
         tags: [...(old?.tags ?? []), tag].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
       }));
-      onChange([...value, tag.id]);
+      onChange([...new Set([...valueRef.current, tag.id])]);
       setName('');
       setCreating(false);
     }
@@ -115,6 +118,7 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
             type="button"
             key={tag.id}
             className={`tag-choice${value.includes(tag.id) ? ' selected' : ''}`}
+            disabled={create.isPending || (!value.includes(tag.id) && atLimit)}
             onClick={() =>
               onChange(value.includes(tag.id) ? value.filter((id) => id !== tag.id) : [...value, tag.id])
             }
@@ -126,12 +130,14 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
         <button
           type="button"
           className="tag-choice add-tag"
+          disabled={atLimit || create.isPending}
           onClick={() => setCreating((current) => !current)}
         >
           <Plus size={13} />
           新标签
         </button>
       </div>
+      {atLimit && <div className="tag-limit">每条周报最多选择 {maxReportItemTags} 个标签</div>}
       {creating && (
         <div className="tag-create-row">
           <TagIcon size={15} />

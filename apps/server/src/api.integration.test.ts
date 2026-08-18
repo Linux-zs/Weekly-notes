@@ -56,6 +56,34 @@ describe('authenticated weekly report workflow', () => {
     expect(response.json().issues).toEqual(expect.any(Array));
   });
 
+  it('rejects unknown tags without changing the item or report version', async () => {
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2031/1',
+      headers: headers(),
+      payload: {}
+    });
+    const item = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'completed', contentMd: '标签校验' }
+    });
+    const before = await app.inject({ method: 'GET', url: '/api/reports/2031/1', headers: headers() });
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers(),
+      payload: { tagIds: [crypto.randomUUID()], expectedVersion: item.json().version }
+    });
+    const after = await app.inject({ method: 'GET', url: '/api/reports/2031/1', headers: headers() });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('INVALID_TAGS');
+    expect(after.json().version).toBe(before.json().version);
+    expect(after.json().items[0].version).toBe(item.json().version);
+  });
+
   it('reorders the complete active project catalog atomically and rejects stale orders', async () => {
     for (const name of ['排序项目甲', '排序项目乙'])
       expect(

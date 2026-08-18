@@ -53,7 +53,7 @@ export async function buildApp() {
     },
     strictTransportSecurity: config.isProduction
   });
-  await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
+  await app.register(rateLimit, { max: config.NODE_ENV === 'test' ? 10_000 : 120, timeWindow: '1 minute' });
   app.addHook('onRequest', async (request, reply) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && !request.url.startsWith('/auth/')) {
       const origin = request.headers.origin;

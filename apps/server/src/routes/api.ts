@@ -79,12 +79,19 @@ interface SearchResultRow {
   projectColor: string | null;
 }
 
-function replaceTags(entityId: string, tagIds: string[], workspaceId: string) {
+function replaceTags(entityId: string, tagIds: string[]) {
   sqlite.prepare('DELETE FROM report_item_tags WHERE report_item_id=?').run(entityId);
-  const insert = sqlite.prepare(
-    'INSERT INTO report_item_tags(report_item_id,tag_id) SELECT ?,id FROM tags WHERE id=? AND workspace_id=?'
-  );
-  tagIds.forEach((tagId) => insert.run(entityId, tagId, workspaceId));
+  const insert = sqlite.prepare('INSERT INTO report_item_tags(report_item_id,tag_id) VALUES(?,?)');
+  tagIds.forEach((tagId) => insert.run(entityId, tagId));
+}
+
+function validTagIds(tagIds: string[], workspaceId: string) {
+  if (!tagIds.length) return true;
+  const placeholders = tagIds.map(() => '?').join(',');
+  const found = sqlite
+    .prepare(`SELECT COUNT(*) AS count FROM tags WHERE workspace_id=? AND id IN (${placeholders})`)
+    .get(workspaceId, ...tagIds) as { count: number };
+  return found.count === tagIds.length;
 }
 
 function loadTagsFor(itemId: string) {
@@ -561,6 +568,8 @@ export async function registerApi(app: FastifyInstance) {
       return reply.code(400).send({ error: 'INVALID_PROJECT', message: '项目不可用' });
     if (!validCategoryId(input.categoryId ?? null, user.workspaceId))
       return reply.code(400).send({ error: 'INVALID_CATEGORY', message: '分类不可用' });
+    if (!validTagIds(input.tagIds, user.workspaceId))
+      return reply.code(400).send({ error: 'INVALID_TAGS', message: '标签不存在或不属于当前工作区' });
     const pos =
       input.position ??
       (
@@ -591,7 +600,7 @@ export async function registerApi(app: FastifyInstance) {
           timestamp,
           timestamp
         );
-      replaceTags(itemId, input.tagIds, user.workspaceId);
+      replaceTags(itemId, input.tagIds);
       sqlite
         .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
         .run(timestamp, reportId);
@@ -636,6 +645,8 @@ export async function registerApi(app: FastifyInstance) {
       !validCategoryId(body.categoryId, user.workspaceId)
     )
       return reply.code(400).send({ error: 'INVALID_CATEGORY', message: '分类不可用' });
+    if (body.tagIds && !validTagIds(body.tagIds, user.workspaceId))
+      return reply.code(400).send({ error: 'INVALID_TAGS', message: '标签不存在或不属于当前工作区' });
     const timestamp = now();
     sqlite.transaction(() => {
       const result = sqlite
@@ -656,7 +667,7 @@ export async function registerApi(app: FastifyInstance) {
           body.expectedVersion
         );
       if (!result.changes) throw new Error('VERSION_CONFLICT');
-      if (body.tagIds) replaceTags(itemId, body.tagIds, user.workspaceId);
+      if (body.tagIds) replaceTags(itemId, body.tagIds);
       sqlite
         .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
         .run(timestamp, current.report_id);
