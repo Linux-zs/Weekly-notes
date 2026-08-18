@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      NODE_ENV: production
+      DEV_AUTH_BYPASS: "false"
       PORT: 3000
       DATABASE_PATH: /app/data/zhoubao.sqlite
       BACKUP_DIR: /app/backups
