@@ -2,7 +2,8 @@ import path from 'node:path';
 import { z } from 'zod';
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('production'),
+  HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   APP_ORIGIN: z.url().default('http://127.0.0.1:3000'),
   TRUST_PROXY: z.enum(['true', 'false']).default('false'),
@@ -12,7 +13,7 @@ const envSchema = z.object({
   HOLIDAY_DATA_DIR: z.string().default('./data/holidays'),
   SESSION_COOKIE_NAME: z.string().default('zhoubao_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
-  DEV_AUTH_BYPASS: z.enum(['true', 'false']).default('true'),
+  DEV_AUTH_BYPASS: z.enum(['true', 'false']).default('false'),
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),
   MICROSOFT_CLIENT_ID: z.string().default(''),

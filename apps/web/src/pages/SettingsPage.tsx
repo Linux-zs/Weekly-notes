@@ -63,7 +63,10 @@ export function SettingsPage() {
   });
   const providers = useQuery({
     queryKey: ['providers'],
-    queryFn: () => api<{ providers: Array<{ provider: string; enabled: boolean }> }>('/api/auth/providers')
+    queryFn: () =>
+      api<{ devAuthEnabled: boolean; providers: Array<{ provider: string; enabled: boolean }> }>(
+        '/api/auth/providers'
+      )
   });
   const tags = useQuery({ queryKey: ['tags'], queryFn: () => api<{ tags: Tag[] }>('/api/tags') });
   const categories = useQuery({

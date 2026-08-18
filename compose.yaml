@@ -6,6 +6,7 @@ services:
     environment:
       NODE_ENV: production
       DEV_AUTH_BYPASS: "false"
+      HOST: 0.0.0.0
       PORT: 3000
       DATABASE_PATH: /app/data/zhoubao.sqlite
       BACKUP_DIR: /app/backups

@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "cross-env NODE_ENV=development DEV_AUTH_BYPASS=true HOST=127.0.0.1 tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "start": "node dist/index.js",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
     "db:migrate": "tsx src/scripts/migrate.ts",
     "db:backup": "tsx src/scripts/backup.ts",
     "holiday:import": "tsx src/scripts/import-holidays.ts"

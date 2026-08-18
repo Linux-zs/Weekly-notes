@@ -4,7 +4,7 @@ import { scheduleBackups } from './services/backup.js';
 import { scheduleMaintenance } from './services/maintenance.js';
 
 const app = await buildApp();
-await app.listen({ port: config.PORT, host: '0.0.0.0' });
+await app.listen({ port: config.PORT, host: config.HOST });
 scheduleBackups(app.log);
 scheduleMaintenance(app.log);
 

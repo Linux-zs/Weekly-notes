@@ -368,6 +368,7 @@ export async function registerAuth(app: FastifyInstance) {
   });
 
   app.get('/api/auth/providers', async () => ({
+    devAuthEnabled: config.devAuthBypass && !config.isProduction,
     providers: (['google', 'microsoft', 'github', 'apple'] as AuthProvider[]).map((provider) => ({
       provider,
       enabled: enabled(provider)

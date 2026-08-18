@@ -146,7 +146,10 @@ function Avatar({ user }: { user: { displayName: string; avatarUrl: string | nul
 function LoginPage() {
   const providers = useQuery({
     queryKey: ['providers'],
-    queryFn: () => api<{ providers: Array<{ provider: string; enabled: boolean }> }>('/api/auth/providers')
+    queryFn: () =>
+      api<{ devAuthEnabled: boolean; providers: Array<{ provider: string; enabled: boolean }> }>(
+        '/api/auth/providers'
+      )
   });
   const labels: Record<string, string> = {
     google: 'Google',
@@ -212,14 +215,17 @@ function LoginPage() {
               ))
           )}
         </div>
-        {providers.data?.providers.every((p) => !p.enabled) && (
-          <>
-            <p className="muted center">尚未配置登录平台。本地开发可使用开发入口。</p>
-            <a className="button full" href="/auth/dev">
-              进入本地开发环境
-            </a>
-          </>
-        )}
+        {providers.data?.providers.every((p) => !p.enabled) &&
+          (providers.data.devAuthEnabled ? (
+            <>
+              <p className="muted center">尚未配置登录平台。本地开发可使用开发入口。</p>
+              <a className="button full" href="/auth/dev">
+                进入本地开发环境
+              </a>
+            </>
+          ) : (
+            <div className="inline-alert">尚未配置可用的登录平台，请联系管理员完成身份平台配置。</div>
+          ))}
         <p className="login-note">登录即表示仅在你的授权空间内保存周报数据。</p>
       </section>
     </div>
