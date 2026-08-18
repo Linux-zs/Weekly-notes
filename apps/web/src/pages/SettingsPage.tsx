@@ -511,7 +511,6 @@ function SettingsContent({
           </div>
           <div className="account-list">
             {accounts.map((account) => {
-              const provider = providers.find((item) => item.provider === account.provider);
               return (
                 <div className="account-row" key={account.id}>
                   <span className={`provider-icon ${account.provider}`}>
