@@ -10,6 +10,7 @@ import {
 import type { ReportItemProgress, ReportItemType } from '@zhoubao/shared';
 import { z } from 'zod';
 import { id, now, sqlite } from '../db/index.js';
+import { isSqliteUniqueConstraint } from '../db/errors.js';
 import { requireUser } from '../types.js';
 import type { CurrentUser } from '../types.js';
 import { isoWeekForDate, isoWeekRange } from '../lib/week.js';
@@ -428,7 +429,7 @@ export async function registerApi(app: FastifyInstance) {
           .run(timestamp, reportId);
       })();
     } catch (error) {
-      if (error instanceof Error && error.message.includes('UNIQUE'))
+      if (isSqliteUniqueConstraint(error))
         return reply.code(409).send({ error: 'CATEGORY_EXISTS', message: '分类已存在' });
       throw error;
     }

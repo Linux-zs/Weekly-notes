@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { projectInputSchema, reportCategoryInputSchema } from '@zhoubao/shared';
 import { z } from 'zod';
 import { id, now, sqlite } from '../db/index.js';
+import { isSqliteUniqueConstraint } from '../db/errors.js';
 import { requireUser } from '../types.js';
 
 const uuidParam = z.object({ id: z.string().uuid() });
@@ -127,7 +128,9 @@ export async function registerCatalog(app: FastifyInstance) {
     } catch (error) {
       if (error instanceof Error && error.message === 'CATEGORY_ASSIGNMENT_CONFLICT')
         return reply.code(409).send({ error: 'CATEGORY_ASSIGNMENT_CONFLICT' });
-      return reply.code(409).send({ error: 'CATEGORY_EXISTS', message: '分类已存在' });
+      if (isSqliteUniqueConstraint(error))
+        return reply.code(409).send({ error: 'CATEGORY_EXISTS', message: '分类已存在' });
+      throw error;
     }
     return reply
       .code(201)
@@ -183,8 +186,10 @@ export async function registerCatalog(app: FastifyInstance) {
           categoryId,
           workspaceId
         );
-    } catch {
-      return reply.code(409).send({ error: 'CATEGORY_EXISTS', message: '分类已存在' });
+    } catch (error) {
+      if (isSqliteUniqueConstraint(error))
+        return reply.code(409).send({ error: 'CATEGORY_EXISTS', message: '分类已存在' });
+      throw error;
     }
     return {
       id: categoryId,
@@ -337,8 +342,10 @@ export async function registerCatalog(app: FastifyInstance) {
           timestamp,
           timestamp
         );
-    } catch {
-      return reply.code(409).send({ error: 'TAG_EXISTS', message: '标签已存在' });
+    } catch (error) {
+      if (isSqliteUniqueConstraint(error))
+        return reply.code(409).send({ error: 'TAG_EXISTS', message: '标签已存在' });
+      throw error;
     }
     return reply.code(201).send({ id: tagId, ...input });
   });
@@ -356,8 +363,10 @@ export async function registerCatalog(app: FastifyInstance) {
       sqlite
         .prepare('UPDATE tags SET name=?,normalized_name=?,color=?,updated_at=? WHERE id=?')
         .run(name, normalized, input.color ?? current.color, now(), tagId);
-    } catch {
-      return reply.code(409).send({ error: 'TAG_EXISTS', message: '标签已存在' });
+    } catch (error) {
+      if (isSqliteUniqueConstraint(error))
+        return reply.code(409).send({ error: 'TAG_EXISTS', message: '标签已存在' });
+      throw error;
     }
     return { id: tagId, name, color: input.color ?? current.color };
   });

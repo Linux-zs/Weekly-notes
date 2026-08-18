@@ -43,6 +43,47 @@ function listFiles(root: string): string[] {
 }
 
 describe('authenticated weekly report workflow', () => {
+  it('only reports catalog conflicts for actual unique constraint failures', async () => {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/tags',
+      headers: headers(),
+      payload: { name: '目录异常测试', color: '#78909C' }
+    });
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/tags',
+      headers: headers(),
+      payload: { name: '目录异常测试', color: '#78909C' }
+    });
+    expect(first.statusCode).toBe(201);
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json().error).toBe('TAG_EXISTS');
+
+    sqlite
+      .prepare(
+        `CREATE TRIGGER reject_catalog_test_tag
+         BEFORE INSERT ON tags WHEN NEW.name='触发数据库故障'
+         BEGIN SELECT RAISE(FAIL, 'simulated catalog write failure'); END`
+      )
+      .run();
+    try {
+      const failed = await app.inject({
+        method: 'POST',
+        url: '/api/tags',
+        headers: headers(),
+        payload: { name: '触发数据库故障', color: '#78909C' }
+      });
+      expect(failed.statusCode).toBe(500);
+      expect(failed.json()).toEqual({
+        error: 'INTERNAL_SERVER_ERROR',
+        message: '服务器内部错误'
+      });
+    } finally {
+      sqlite.prepare('DROP TRIGGER reject_catalog_test_tag').run();
+    }
+  });
+
   it('returns a structured 400 response for invalid request payloads', async () => {
     const response = await app.inject({
       method: 'POST',
