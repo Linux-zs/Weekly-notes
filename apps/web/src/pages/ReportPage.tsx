@@ -1987,42 +1987,46 @@ function ReportItemRow({
               <small className="form-error">附件读取失败：{attachments.error.message}</small>
             ) : attachments.data?.attachments.length ? (
               <div className="attachment-list">
-                {attachments.data.attachments.map((attachment) => (
-                  <div key={attachment.id}>
-                    <a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">
-                      {attachment.originalName}
-                    </a>
-                    <span>{Math.max(1, Math.round(attachment.sizeBytes / 1024))} KB</span>
-                    {attachmentImageWidth(content, attachment.id) !== null ? (
-                      <label className="attachment-size-control">
-                        <span>宽度 {attachmentImageWidth(content, attachment.id)}%</span>
-                        <input
-                          type="range"
-                          min="25"
-                          max="100"
-                          step="5"
-                          value={attachmentImageWidth(content, attachment.id) ?? 70}
-                          onChange={(event) =>
-                            setContent((current) =>
-                              setAttachmentImageWidth(current, attachment.id, Number(event.target.value))
-                            )
-                          }
-                          aria-label={`调整图片 ${attachment.originalName} 的显示宽度`}
-                        />
-                      </label>
-                    ) : (
-                      <span className="attachment-unlinked">未插入正文</span>
-                    )}
-                    <button
-                      className="icon-button danger"
-                      aria-label={`删除附件 ${attachment.originalName}`}
-                      disabled={removeAttachment.isPending}
-                      onClick={() => removeAttachment.mutate(attachment.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+                {attachments.data.attachments.map((attachment) => {
+                  const referencedInContent = content.includes(`/api/attachments/${attachment.id}`);
+                  return (
+                    <div key={attachment.id}>
+                      <a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">
+                        {attachment.originalName}
+                      </a>
+                      <span>{Math.max(1, Math.round(attachment.sizeBytes / 1024))} KB</span>
+                      {attachmentImageWidth(content, attachment.id) !== null ? (
+                        <label className="attachment-size-control">
+                          <span>宽度 {attachmentImageWidth(content, attachment.id)}%</span>
+                          <input
+                            type="range"
+                            min="25"
+                            max="100"
+                            step="5"
+                            value={attachmentImageWidth(content, attachment.id) ?? 70}
+                            onChange={(event) =>
+                              setContent((current) =>
+                                setAttachmentImageWidth(current, attachment.id, Number(event.target.value))
+                              )
+                            }
+                            aria-label={`调整图片 ${attachment.originalName} 的显示宽度`}
+                          />
+                        </label>
+                      ) : (
+                        <span className="attachment-unlinked">未插入正文</span>
+                      )}
+                      <button
+                        className="icon-button danger"
+                        aria-label={`删除附件 ${attachment.originalName}`}
+                        title={referencedInContent ? '请先移除正文中的图片引用' : '删除附件'}
+                        disabled={referencedInContent || removeAttachment.isPending}
+                        onClick={() => removeAttachment.mutate(attachment.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <small>暂无附件。进入编辑模式可以添加图片。</small>

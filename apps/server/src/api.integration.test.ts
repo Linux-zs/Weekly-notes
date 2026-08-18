@@ -191,12 +191,67 @@ describe('authenticated weekly report workflow', () => {
     });
     expect(attachmentList.statusCode).toBe(200);
     expect(attachmentList.json().attachments).toHaveLength(1);
+    const referenceAttachment = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers(),
+      payload: {
+        contentMd: `完成 API 集成测试\n\n![测试图片](${uploaded.json().url})`,
+        expectedVersion: 2
+      }
+    });
+    expect(referenceAttachment.statusCode).toBe(200);
+    const referencedAttachmentDelete = await app.inject({
+      method: 'DELETE',
+      url: `/api/attachments/${uploaded.json().id}`,
+      headers: headers()
+    });
+    expect(referencedAttachmentDelete.statusCode).toBe(409);
+    expect(referencedAttachmentDelete.json().error).toBe('ATTACHMENT_IN_USE');
+    const referencingItem = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/items`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        contentMd: `跨条目引用 ![测试图片](${uploaded.json().url})`,
+        projectId
+      }
+    });
+    expect(referencingItem.statusCode).toBe(201);
+    const removeOwnReference = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers(),
+      payload: { contentMd: '完成 API 集成测试', expectedVersion: 3 }
+    });
+    expect(removeOwnReference.statusCode).toBe(200);
+    const referencedItemDelete = await app.inject({
+      method: 'DELETE',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers()
+    });
+    expect(referencedItemDelete.statusCode).toBe(409);
+    expect(referencedItemDelete.json().error).toBe('ITEM_ATTACHMENTS_IN_USE');
+    const removeOtherReference = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${referencingItem.json().id}`,
+      headers: headers(),
+      payload: { contentMd: '已移除跨条目引用', expectedVersion: 1 }
+    });
+    expect(removeOtherReference.statusCode).toBe(200);
     const attachmentDelete = await app.inject({
       method: 'DELETE',
       url: `/api/attachments/${uploaded.json().id}`,
       headers: headers()
     });
     expect(attachmentDelete.statusCode).toBe(204);
+    const referencingItemDelete = await app.inject({
+      method: 'DELETE',
+      url: `/api/report-items/${referencingItem.json().id}`,
+      headers: headers()
+    });
+    expect(referencingItemDelete.statusCode).toBe(204);
     const reportWeeks = await app.inject({
       method: 'GET',
       url: '/api/report-weeks/2026',

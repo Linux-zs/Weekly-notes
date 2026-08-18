@@ -766,6 +766,20 @@ export async function registerApi(app: FastifyInstance) {
       )
       .get(attachmentId, user.workspaceId, user.id) as { id: string; storedName: string } | undefined;
     if (!attachment) return reply.code(404).send({ error: 'NOT_FOUND' });
+    const reference = sqlite
+      .prepare(
+        `SELECT 1
+         FROM report_items ri
+         JOIN weekly_reports wr ON wr.id=ri.report_id
+         WHERE wr.workspace_id=? AND wr.author_id=? AND instr(ri.content_md,?)>0
+         LIMIT 1`
+      )
+      .get(user.workspaceId, user.id, `/api/attachments/${attachmentId}`);
+    if (reference)
+      return reply.code(409).send({
+        error: 'ATTACHMENT_IN_USE',
+        message: '附件仍被周报正文引用，请先移除正文中的引用'
+      });
     sqlite.prepare('DELETE FROM report_attachments WHERE id=?').run(attachmentId);
     fs.rmSync(path.join(config.uploadDir, attachment.storedName), { force: true });
     return reply.code(204).send();
@@ -780,8 +794,25 @@ export async function registerApi(app: FastifyInstance) {
       { report_id: string } | undefined;
     if (!row) return reply.code(404).send({ error: 'NOT_FOUND' });
     const attachments = sqlite
-      .prepare('SELECT stored_name AS storedName FROM report_attachments WHERE report_item_id=?')
-      .all(itemId) as Array<{ storedName: string }>;
+      .prepare('SELECT id,stored_name AS storedName FROM report_attachments WHERE report_item_id=?')
+      .all(itemId) as Array<{ id: string; storedName: string }>;
+    const user = request.currentUser!;
+    const externallyReferenced = attachments.some((attachment) =>
+      sqlite
+        .prepare(
+          `SELECT 1
+           FROM report_items ri
+           JOIN weekly_reports wr ON wr.id=ri.report_id
+           WHERE ri.id<>? AND wr.workspace_id=? AND wr.author_id=? AND instr(ri.content_md,?)>0
+           LIMIT 1`
+        )
+        .get(itemId, user.workspaceId, user.id, `/api/attachments/${attachment.id}`)
+    );
+    if (externallyReferenced)
+      return reply.code(409).send({
+        error: 'ITEM_ATTACHMENTS_IN_USE',
+        message: '该条目的附件仍被其他周报引用，请先移除引用'
+      });
     sqlite.transaction(() => {
       sqlite.prepare('DELETE FROM report_items WHERE id=?').run(itemId);
       sqlite
