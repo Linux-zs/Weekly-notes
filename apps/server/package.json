@@ -23,7 +23,6 @@
     "@zhoubao/shared": "workspace:*",
     "better-sqlite3": "^12.2.0",
     "date-fns": "^4.1.0",
-    "drizzle-orm": "^0.44.5",
     "fastify": "^5.5.0",
     "jose": "^6.1.0",
     "openid-client": "^6.8.1",
