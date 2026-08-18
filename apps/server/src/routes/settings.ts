@@ -241,6 +241,22 @@ export async function registerSettings(app: FastifyInstance) {
   app.get('/api/settings/export', { preHandler: requireUser }, async (request, reply) => {
     const user = request.currentUser!;
     const workspaceId = user.workspaceId;
+    const reportItems = sqlite
+      .prepare(
+        'SELECT ri.id,ri.report_id AS reportId,ri.imported_from_item_id AS importedFromItemId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
+      )
+      .all(workspaceId, user.id) as Array<Record<string, unknown> & { id: string }>;
+    const tagRows = sqlite
+      .prepare(
+        'SELECT rit.report_item_id AS reportItemId,rit.tag_id AS tagId FROM report_item_tags rit JOIN report_items ri ON ri.id=rit.report_item_id JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=? ORDER BY rit.report_item_id,rit.tag_id'
+      )
+      .all(workspaceId, user.id) as Array<{ reportItemId: string; tagId: string }>;
+    const tagIdsByItem = new Map<string, string[]>();
+    tagRows.forEach((row) => {
+      const ids = tagIdsByItem.get(row.reportItemId) ?? [];
+      ids.push(row.tagId);
+      tagIdsByItem.set(row.reportItemId, ids);
+    });
     const payload = {
       exportedAt: now(),
       profile: sqlite
@@ -267,11 +283,7 @@ export async function registerSettings(app: FastifyInstance) {
           'SELECT id,week_year AS weekYear,week_number AS weekNumber,week_start AS weekStart,week_end AS weekEnd,created_at AS createdAt,updated_at AS updatedAt FROM weekly_reports WHERE workspace_id=? AND author_id=?'
         )
         .all(workspaceId, user.id),
-      reportItems: sqlite
-        .prepare(
-          'SELECT ri.id,ri.report_id AS reportId,ri.imported_from_item_id AS importedFromItemId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
-        )
-        .all(workspaceId, user.id),
+      reportItems: reportItems.map((item) => ({ ...item, tagIds: tagIdsByItem.get(item.id) ?? [] })),
       attachments: sqlite
         .prepare(
           'SELECT id,report_item_id AS reportItemId,original_name AS originalName,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM report_attachments WHERE workspace_id=? AND author_id=?'

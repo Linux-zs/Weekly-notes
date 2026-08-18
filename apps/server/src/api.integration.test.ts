@@ -84,6 +84,36 @@ describe('authenticated weekly report workflow', () => {
     expect(after.json().items[0].version).toBe(item.json().version);
   });
 
+  it('exports tag associations for each owned report item', async () => {
+    const tag = await app.inject({
+      method: 'POST',
+      url: '/api/tags',
+      headers: headers(),
+      payload: { name: `导出-${crypto.randomUUID().slice(0, 8)}`, color: '#345B9B' }
+    });
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2032/1',
+      headers: headers(),
+      payload: {}
+    });
+    const item = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'completed', contentMd: '导出标签关联', tagIds: [tag.json().id] }
+    });
+    expect(tag.statusCode).toBe(201);
+    expect(item.statusCode).toBe(201);
+    const exported = await app.inject({ method: 'GET', url: '/api/settings/export', headers: headers() });
+    const exportedItem = exported
+      .json()
+      .reportItems.find((entry: { id: string }) => entry.id === item.json().id);
+
+    expect(exported.statusCode).toBe(200);
+    expect(exportedItem.tagIds).toEqual([tag.json().id]);
+  });
+
   it('reorders the complete active project catalog atomically and rejects stale orders', async () => {
     for (const name of ['排序项目甲', '排序项目乙'])
       expect(
