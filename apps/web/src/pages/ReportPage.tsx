@@ -282,6 +282,7 @@ export function ReportPage({ user }: { user: User }) {
           projects={projects.data!.projects}
           categories={categories.data!.categories}
           onAdd={(projectId, categoryId) => addMutation.mutate({ type: activeType, projectId, categoryId })}
+          addingItem={addMutation.isPending}
           onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
           onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
           creatingProject={createProject.isPending}
@@ -300,6 +301,7 @@ export function ReportPage({ user }: { user: User }) {
             projects={projects.data!.projects}
             categories={categories.data!.categories}
             onAdd={(projectId, categoryId) => addMutation.mutate({ type: 'other', projectId, categoryId })}
+            addingItem={addMutation.isPending}
             onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
             onCreateProject={(draft) => createProject.mutateAsync({ type: 'other', draft })}
             creatingProject={createProject.isPending}
@@ -538,6 +540,7 @@ function ReportSection({
   projects,
   categories,
   onAdd,
+  addingItem,
   onCreateCategory,
   onCreateProject,
   creatingProject,
@@ -556,6 +559,7 @@ function ReportSection({
   projects: Project[];
   categories: ReportCategory[];
   onAdd: (projectId: string | null, categoryId: string | null) => void;
+  addingItem: boolean;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
   onCreateProject: (draft: ProjectDraft) => Promise<Project>;
   creatingProject: boolean;
@@ -758,6 +762,7 @@ function ReportSection({
                     categories={categories}
                     type={type}
                     onAdd={(categoryId) => onAdd(group.project?.id ?? null, categoryId)}
+                    addingItem={addingItem}
                     onCreateCategory={onCreateCategory}
                     onImport={() => setImportOpen(true)}
                   />
@@ -766,9 +771,9 @@ function ReportSection({
             </SortableContext>
           </DndContext>
         ) : (
-          <button className="section-empty" onClick={() => onAdd(null, null)}>
+          <button className="section-empty" disabled={addingItem} onClick={() => onAdd(null, null)}>
             <Plus size={18} />
-            <span>添加一条{sectionLabels[type]}</span>
+            <span>{addingItem ? '添加中…' : `添加一条${sectionLabels[type]}`}</span>
           </button>
         )}
       </section>
@@ -844,6 +849,7 @@ function ProjectReportGroup({
   categories,
   type,
   onAdd,
+  addingItem,
   onCreateCategory,
   onImport
 }: {
@@ -853,6 +859,7 @@ function ProjectReportGroup({
   categories: ReportCategory[];
   type: ReportItemType;
   onAdd: (categoryId: string | null) => void;
+  addingItem: boolean;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
   onImport: () => void;
 }) {
@@ -1037,9 +1044,13 @@ function ProjectReportGroup({
                 </button>
               )}
             </div>
-            <button className="project-row-add" onClick={() => onAdd(defaultCategoryId)}>
+            <button
+              className="project-row-add"
+              disabled={addingItem}
+              onClick={() => onAdd(defaultCategoryId)}
+            >
               <Plus size={13} />
-              添加一条
+              {addingItem ? '添加中…' : '添加一条'}
             </button>
           </div>
         )}
