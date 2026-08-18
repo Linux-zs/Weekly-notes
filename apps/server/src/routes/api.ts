@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import {
   projectInputSchema,
   reportCategoryInputSchema,
@@ -15,7 +15,7 @@ import type { CurrentUser } from '../types.js';
 import { isoWeekForDate, isoWeekRange } from '../lib/week.js';
 import { detectImage } from '../lib/image.js';
 import { config } from '../config.js';
-import { withStorageLock } from '../services/storage.js';
+import { removeStoredFile, withStorageLock } from '../services/storage.js';
 
 const uuidParam = z.object({ id: z.string().uuid() });
 const weekParams = z.object({
@@ -77,14 +77,6 @@ interface SearchResultRow {
   weekStart: string;
   projectName: string | null;
   projectColor: string | null;
-}
-
-function removeStoredFile(filePath: string, logger: FastifyBaseLogger, message: string) {
-  try {
-    fs.rmSync(filePath, { force: true });
-  } catch (error) {
-    logger.warn({ err: error, filePath }, message);
-  }
 }
 
 function replaceTags(entityId: string, tagIds: string[], workspaceId: string) {

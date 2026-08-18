@@ -1309,6 +1309,44 @@ describe('authenticated weekly report workflow', () => {
     expect(avatar.headers['content-type']).toContain('image/png');
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: headers() });
     expect(me.json().user.avatarUrl).toBe(uploaded.json().avatarUrl);
+
+    const oldAvatarPath = path.join(
+      process.env.UPLOAD_DIR!,
+      'avatars',
+      uploaded.json().avatarUrl.split('/').pop()
+    );
+    fs.rmSync(oldAvatarPath);
+    fs.mkdirSync(oldAvatarPath);
+    fs.writeFileSync(path.join(oldAvatarPath, 'prevents-non-recursive-delete'), 'test');
+    const replacement = await app.inject({
+      method: 'POST',
+      url: '/api/settings/avatar',
+      headers: { ...headers(), 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: multipart
+    });
+    expect(replacement.statusCode).toBe(201);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/me', headers: headers() })).json().user.avatarUrl
+    ).toBe(replacement.json().avatarUrl);
+    fs.rmSync(oldAvatarPath, { recursive: true, force: true });
+
+    const filesBeforeFailure = listFiles(path.join(process.env.UPLOAD_DIR!, 'avatars')).sort();
+    sqlite.exec(`CREATE TRIGGER fail_test_avatar_update
+      BEFORE UPDATE OF avatar_url ON users
+      BEGIN SELECT RAISE(ABORT,'forced avatar update failure'); END;`);
+    let failedReplacement;
+    try {
+      failedReplacement = await app.inject({
+        method: 'POST',
+        url: '/api/settings/avatar',
+        headers: { ...headers(), 'content-type': `multipart/form-data; boundary=${boundary}` },
+        payload: multipart
+      });
+    } finally {
+      sqlite.exec('DROP TRIGGER fail_test_avatar_update');
+    }
+    expect(failedReplacement.statusCode).toBe(500);
+    expect(listFiles(path.join(process.env.UPLOAD_DIR!, 'avatars')).sort()).toEqual(filesBeforeFailure);
   });
 
   it('manages invitations and switches the active workspace', async () => {

@@ -8,7 +8,7 @@ import { id, now, sqlite } from '../db/index.js';
 import { detectImage } from '../lib/image.js';
 import { requireUser } from '../types.js';
 import { ensureWorkspaceForUser } from '../auth.js';
-import { withStorageLock } from '../services/storage.js';
+import { removeStoredFile, withStorageLock } from '../services/storage.js';
 
 function validateTimezone(value: string) {
   try {
@@ -115,11 +115,11 @@ export async function registerSettings(app: FastifyInstance) {
       try {
         sqlite.prepare('UPDATE users SET avatar_url=?,updated_at=? WHERE id=?').run(avatarUrl, now(), userId);
       } catch (error) {
-        fs.rmSync(target, { force: true });
+        removeStoredFile(target, request.log, '头像入库失败，补偿删除新头像时发生错误');
         throw error;
       }
       const previous = localAvatarPath(current.avatarUrl);
-      if (previous) fs.rmSync(previous, { force: true });
+      if (previous) removeStoredFile(previous, request.log, '头像已更新，但旧头像文件清理失败');
     });
     return reply.code(201).send({ avatarUrl });
   });
