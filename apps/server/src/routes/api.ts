@@ -77,6 +77,7 @@ interface SearchResultRow {
   weekStart: string;
   projectName: string | null;
   projectColor: string | null;
+  occurredOn: string | null;
 }
 
 function replaceTags(entityId: string, tagIds: string[]) {
@@ -1029,7 +1030,7 @@ export async function registerApi(app: FastifyInstance) {
     }
     const rows = sqlite
       .prepare(
-        `SELECT ri.id,ri.content_md AS contentMd,ri.type,ri.project_id AS projectId,wr.week_year AS weekYear,wr.week_number AS weekNumber,wr.week_start AS weekStart,p.name AS projectName,p.color AS projectColor FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id LEFT JOIN projects p ON p.id=ri.project_id WHERE ${where.join(' AND ')} ORDER BY wr.week_start DESC,ri.position LIMIT 21 OFFSET ?`
+        `SELECT ri.id,ri.content_md AS contentMd,ri.type,ri.project_id AS projectId,ri.occurred_on AS occurredOn,wr.week_year AS weekYear,wr.week_number AS weekNumber,wr.week_start AS weekStart,p.name AS projectName,p.color AS projectColor FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id LEFT JOIN projects p ON p.id=ri.project_id WHERE ${where.join(' AND ')} ORDER BY wr.week_start DESC,ri.position LIMIT 21 OFFSET ?`
       )
       .all(...args, (q.page - 1) * 20) as SearchResultRow[];
     return {

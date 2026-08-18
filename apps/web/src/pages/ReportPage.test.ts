@@ -126,6 +126,27 @@ describe('weekly report category presentation', () => {
     expect(text).toContain('3. [未分类] 整理记录');
   });
 
+  it('includes an occurrence date in copied text only when present', () => {
+    const report: WeeklyReport = {
+      id: 'report-dates',
+      weekYear: 2026,
+      weekNumber: 34,
+      weekStart: '2026-08-17',
+      weekEnd: '2026-08-23',
+      version: 1,
+      author: { id: 'user', displayName: '测试用户', email: null, avatarUrl: null },
+      items: [
+        { ...item('dated', 'development', '完成日期展示'), occurredOn: '2026-08-18' },
+        item('undated', 'development', '没有日期')
+      ],
+      calendarDays: [],
+      holidayDataAvailable: true
+    };
+    const text = buildReportText(report, projects, categories);
+    expect(text).toContain('1. [开发] [2026-08-18] 完成日期展示');
+    expect(text).toContain('2. [开发] 没有日期');
+  });
+
   it('inherits the last active category used by the project', () => {
     const grouped = groupItemsByProjectAndCategory(
       [item('dev', 'development'), item('ops', 'operations'), item('none', null)],

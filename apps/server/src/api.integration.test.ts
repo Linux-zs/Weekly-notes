@@ -416,7 +416,12 @@ describe('authenticated weekly report workflow', () => {
       method: 'PATCH',
       url: `/api/report-items/${item.json().id}`,
       headers: headers(),
-      payload: { progress: 'answered', note: '等待领导确认', expectedVersion: 1 }
+      payload: {
+        progress: 'answered',
+        note: '等待领导确认',
+        occurredOn: '2026-08-12',
+        expectedVersion: 1
+      }
     });
     expect(metadata.statusCode).toBe(200);
     expect(metadata.json()).toMatchObject({ progress: 'answered', note: '等待领导确认', version: 2 });
@@ -576,6 +581,7 @@ describe('authenticated weekly report workflow', () => {
     const search = await app.inject({ method: 'GET', url: '/api/search?q=API', headers: headers() });
     expect(search.statusCode).toBe(200);
     expect(search.json().items).toHaveLength(1);
+    expect(search.json().items[0].occurredOn).toBe('2026-08-12');
     const renamedTag = await app.inject({
       method: 'PATCH',
       url: `/api/tags/${tagId}`,

@@ -359,7 +359,10 @@ export function buildReportText(report: WeeklyReport, projects: Project[], categ
         const summary =
           summarizeMarkdown(item.contentMd) || (item.contentMd.trim() ? '详见周报详情' : '暂无内容');
         const category = item.categoryId ? categoryNames.get(item.categoryId) : null;
-        lines.push(`${index + 1}. [${category ?? '未分类'}] ${summary}${meta ? `（${meta}）` : ''}`);
+        const occurred = item.occurredOn ? ` [${item.occurredOn}]` : '';
+        lines.push(
+          `${index + 1}. [${category ?? '未分类'}]${occurred} ${summary}${meta ? `（${meta}）` : ''}`
+        );
       });
     lines.push('');
   }
@@ -2050,18 +2053,26 @@ function ReportItemRow({
               />
             </div>
           ) : (
-            <div
-              className="detail-preview detail-preview-only"
-              onDoubleClick={(event) => {
-                if (!(event.target instanceof HTMLImageElement)) return;
-                setFullscreenImage({
-                  src: event.target.currentSrc || event.target.src,
-                  alt: event.target.alt || '周报图片'
-                });
-              }}
-            >
-              <Markdown content={content} sizeImages />
-            </div>
+            <>
+              {occurredOn && (
+                <div className="detail-read-meta">
+                  <CalendarDays size={14} />
+                  发生日期：{formatDate(occurredOn)}
+                </div>
+              )}
+              <div
+                className="detail-preview detail-preview-only"
+                onDoubleClick={(event) => {
+                  if (!(event.target instanceof HTMLImageElement)) return;
+                  setFullscreenImage({
+                    src: event.target.currentSrc || event.target.src,
+                    alt: event.target.alt || '周报图片'
+                  });
+                }}
+              >
+                <Markdown content={content} sizeImages />
+              </div>
+            </>
           )}
           <div className="attachment-panel">
             <div className="attachment-panel-heading">

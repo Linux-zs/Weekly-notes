@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
 import { EmptyState, ErrorState, Loading } from '../components';
-import { sectionLabels } from '../lib';
+import { formatDate, sectionLabels } from '../lib';
 
 type Result = {
   id: string;
@@ -17,6 +17,7 @@ type Result = {
   weekStart: string;
   projectName: string | null;
   projectColor: string | null;
+  occurredOn: string | null;
   tags: Tag[];
 };
 type Filters = {
@@ -127,6 +128,7 @@ export function SearchPage() {
         <div className="filter-row">
           <label>
             <CalendarRange size={15} />
+            <span className="filter-label">周报周次</span>
             <input
               type="date"
               value={filters.from}
@@ -225,6 +227,12 @@ export function SearchPage() {
                     <span className="project-label">
                       <i style={{ background: result.projectColor ?? '#78909c' }} />
                       {result.projectName}
+                    </span>
+                  )}
+                  {result.occurredOn && (
+                    <span className="occurred-date">
+                      <CalendarRange size={12} />
+                      发生于 {formatDate(result.occurredOn)}
                     </span>
                   )}
                   {result.tags.map((tag) => (
