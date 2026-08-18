@@ -34,6 +34,14 @@ afterAll(async () => {
 
 const headers = () => ({ cookie, origin: 'http://127.0.0.1:3000' });
 
+function listFiles(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(root, entry.name);
+    return entry.isDirectory() ? listFiles(entryPath) : [entryPath];
+  });
+}
+
 describe('authenticated weekly report workflow', () => {
   it('provisions an uninvited external identity with a personal workspace', async () => {
     const { provisionLoginIdentity } = await import('./auth.js');
@@ -270,6 +278,90 @@ describe('authenticated weekly report workflow', () => {
     });
     expect(renamedTag.statusCode).toBe(200);
     expect(renamedTag.json()).toMatchObject({ name: '已验证', color: '#2F5597' });
+  });
+
+  it('compensates failed attachment inserts and tolerates file cleanup failures', async () => {
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2030/1',
+      headers: headers(),
+      payload: {}
+    });
+    const item = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'completed', contentMd: '附件一致性测试' }
+    });
+    const boundary = 'zhoubao-storage-consistency';
+    const multipart = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="pixel.png"\r\nContent-Type: image/png\r\n\r\n`
+      ),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+      Buffer.from(`\r\n--${boundary}--\r\n`)
+    ]);
+    const upload = () =>
+      app.inject({
+        method: 'POST',
+        url: `/api/report-items/${item.json().id}/images`,
+        headers: { ...headers(), 'content-type': `multipart/form-data; boundary=${boundary}` },
+        payload: multipart
+      });
+
+    const filesBeforeFailure = listFiles(process.env.UPLOAD_DIR!).sort();
+    sqlite.exec(`CREATE TRIGGER fail_test_attachment_insert
+      BEFORE INSERT ON report_attachments
+      BEGIN SELECT RAISE(ABORT,'forced attachment insert failure'); END;`);
+    let failedUpload;
+    try {
+      failedUpload = await upload();
+    } finally {
+      sqlite.exec('DROP TRIGGER fail_test_attachment_insert');
+    }
+    expect(failedUpload.statusCode).toBe(500);
+    expect(listFiles(process.env.UPLOAD_DIR!).sort()).toEqual(filesBeforeFailure);
+
+    const directAttachment = await upload();
+    expect(directAttachment.statusCode).toBe(201);
+    const directStored = sqlite
+      .prepare('SELECT stored_name AS storedName FROM report_attachments WHERE id=?')
+      .get(directAttachment.json().id) as { storedName: string };
+    const directPath = path.join(process.env.UPLOAD_DIR!, directStored.storedName);
+    fs.rmSync(directPath);
+    fs.mkdirSync(directPath);
+    fs.writeFileSync(path.join(directPath, 'prevents-non-recursive-delete'), 'test');
+    const directDelete = await app.inject({
+      method: 'DELETE',
+      url: `/api/attachments/${directAttachment.json().id}`,
+      headers: headers()
+    });
+    expect(directDelete.statusCode).toBe(204);
+    expect(
+      sqlite.prepare('SELECT 1 FROM report_attachments WHERE id=?').get(directAttachment.json().id)
+    ).toBeUndefined();
+    fs.rmSync(directPath, { recursive: true, force: true });
+
+    const itemAttachment = await upload();
+    expect(itemAttachment.statusCode).toBe(201);
+    const itemStored = sqlite
+      .prepare('SELECT stored_name AS storedName FROM report_attachments WHERE id=?')
+      .get(itemAttachment.json().id) as { storedName: string };
+    const itemPath = path.join(process.env.UPLOAD_DIR!, itemStored.storedName);
+    fs.rmSync(itemPath);
+    fs.mkdirSync(itemPath);
+    fs.writeFileSync(path.join(itemPath, 'prevents-non-recursive-delete'), 'test');
+    const itemDelete = await app.inject({
+      method: 'DELETE',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers()
+    });
+    expect(itemDelete.statusCode).toBe(204);
+    expect(sqlite.prepare('SELECT 1 FROM report_items WHERE id=?').get(item.json().id)).toBeUndefined();
+    expect(
+      sqlite.prepare('SELECT 1 FROM report_attachments WHERE id=?').get(itemAttachment.json().id)
+    ).toBeUndefined();
+    fs.rmSync(itemPath, { recursive: true, force: true });
   });
 
   it('does not expose another author report through workspace search', async () => {

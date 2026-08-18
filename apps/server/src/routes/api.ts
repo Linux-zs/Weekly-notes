@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import {
   projectInputSchema,
   reportCategoryInputSchema,
@@ -76,6 +76,14 @@ interface SearchResultRow {
   weekStart: string;
   projectName: string | null;
   projectColor: string | null;
+}
+
+function removeStoredFile(filePath: string, logger: FastifyBaseLogger, message: string) {
+  try {
+    fs.rmSync(filePath, { force: true });
+  } catch (error) {
+    logger.warn({ err: error, filePath }, message);
+  }
 }
 
 function replaceTags(entityId: string, tagIds: string[], workspaceId: string) {
@@ -703,23 +711,29 @@ export async function registerApi(app: FastifyInstance) {
     const storedName = `${attachmentId}.${image.extension}`;
     const workspaceDirectory = path.join(config.uploadDir, user.workspaceId);
     fs.mkdirSync(workspaceDirectory, { recursive: true });
-    fs.writeFileSync(path.join(workspaceDirectory, storedName), buffer, { flag: 'wx' });
+    const storedPath = path.join(workspaceDirectory, storedName);
+    fs.writeFileSync(storedPath, buffer, { flag: 'wx' });
     const originalName = path.basename(upload.filename || 'image').slice(0, 255) || 'image';
-    sqlite
-      .prepare(
-        'INSERT INTO report_attachments(id,workspace_id,author_id,report_item_id,original_name,stored_name,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?,?,?)'
-      )
-      .run(
-        attachmentId,
-        user.workspaceId,
-        user.id,
-        itemId,
-        originalName,
-        `${user.workspaceId}/${storedName}`,
-        image.mimeType,
-        buffer.length,
-        now()
-      );
+    try {
+      sqlite
+        .prepare(
+          'INSERT INTO report_attachments(id,workspace_id,author_id,report_item_id,original_name,stored_name,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?,?,?)'
+        )
+        .run(
+          attachmentId,
+          user.workspaceId,
+          user.id,
+          itemId,
+          originalName,
+          `${user.workspaceId}/${storedName}`,
+          image.mimeType,
+          buffer.length,
+          now()
+        );
+    } catch (error) {
+      removeStoredFile(storedPath, request.log, '附件入库失败，补偿删除已上传文件时发生错误');
+      throw error;
+    }
     return reply.code(201).send({ id: attachmentId, originalName, url: `/api/attachments/${attachmentId}` });
   });
   app.get('/api/attachments/:id', { preHandler: requireUser }, async (request, reply) => {
@@ -781,7 +795,11 @@ export async function registerApi(app: FastifyInstance) {
         message: '附件仍被周报正文引用，请先移除正文中的引用'
       });
     sqlite.prepare('DELETE FROM report_attachments WHERE id=?').run(attachmentId);
-    fs.rmSync(path.join(config.uploadDir, attachment.storedName), { force: true });
+    removeStoredFile(
+      path.join(config.uploadDir, attachment.storedName),
+      request.log,
+      '附件记录已删除，但文件清理失败'
+    );
     return reply.code(204).send();
   });
   app.delete('/api/report-items/:id', { preHandler: requireUser }, async (request, reply) => {
@@ -820,7 +838,11 @@ export async function registerApi(app: FastifyInstance) {
         .run(now(), row.report_id);
     })();
     attachments.forEach((attachment) =>
-      fs.rmSync(path.join(config.uploadDir, attachment.storedName), { force: true })
+      removeStoredFile(
+        path.join(config.uploadDir, attachment.storedName),
+        request.log,
+        '周报条目已删除，但附件文件清理失败'
+      )
     );
     return reply.code(204).send();
   });
