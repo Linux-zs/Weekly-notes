@@ -839,9 +839,12 @@ export async function registerApi(app: FastifyInstance) {
       if (!moved) return reply.code(400).send({ error: 'INVALID_MOVE' });
       if (moved.version !== body.move.expectedVersion)
         return reply.code(409).send({ error: 'VERSION_CONFLICT', current: serializeReportItem(moved) });
-      if (!validProjectId(body.move.projectId, user.workspaceId))
+      if (body.move.projectId !== moved.project_id && !validProjectId(body.move.projectId, user.workspaceId))
         return reply.code(400).send({ error: 'INVALID_PROJECT', message: '项目不可用' });
-      if (!validCategoryId(body.move.categoryId, user.workspaceId))
+      if (
+        body.move.categoryId !== moved.category_id &&
+        !validCategoryId(body.move.categoryId, user.workspaceId)
+      )
         return reply.code(400).send({ error: 'INVALID_CATEGORY', message: '分类不可用' });
     }
 

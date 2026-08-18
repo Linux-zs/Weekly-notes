@@ -490,6 +490,19 @@ describe('authenticated weekly report workflow', () => {
       currentVersion: 4
     });
 
+    const third = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/items`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        contentMd: '保留停用项目归属',
+        projectId: secondProject.json().id,
+        categoryId: developmentId
+      }
+    });
+    expect(third.statusCode).toBe(201);
+
     const archived = await app.inject({
       method: 'PATCH',
       url: `/api/categories/${operationsId}`,
@@ -497,6 +510,13 @@ describe('authenticated weekly report workflow', () => {
       payload: { archived: true }
     });
     expect(archived.statusCode).toBe(200);
+    const archivedProject = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${secondProject.json().id}`,
+      headers: headers(),
+      payload: { archived: true }
+    });
+    expect(archivedProject.statusCode).toBe(200);
     const historicalUpdate = await app.inject({
       method: 'PATCH',
       url: `/api/report-items/${first.json().id}`,
@@ -505,6 +525,48 @@ describe('authenticated weekly report workflow', () => {
     });
     expect(historicalUpdate.statusCode).toBe(200);
     expect(historicalUpdate.json().categoryId).toBe(operationsId);
+    const retainArchivedCategory = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        ids: [second.json().id, first.json().id, third.json().id],
+        expectedReportVersion: 6,
+        move: {
+          itemId: first.json().id,
+          projectId: firstProject.json().id,
+          categoryId: operationsId,
+          expectedVersion: 3
+        }
+      }
+    });
+    expect(retainArchivedCategory.statusCode).toBe(200);
+    expect(retainArchivedCategory.json()).toMatchObject({
+      reportVersion: 7,
+      movedItem: { projectId: firstProject.json().id, categoryId: operationsId }
+    });
+    const retainArchivedProject = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        ids: [second.json().id, first.json().id, third.json().id],
+        expectedReportVersion: 7,
+        move: {
+          itemId: third.json().id,
+          projectId: secondProject.json().id,
+          categoryId: null,
+          expectedVersion: 1
+        }
+      }
+    });
+    expect(retainArchivedProject.statusCode).toBe(200);
+    expect(retainArchivedProject.json()).toMatchObject({
+      reportVersion: 8,
+      movedItem: { projectId: secondProject.json().id, categoryId: null }
+    });
     const assignArchived = await app.inject({
       method: 'PATCH',
       url: `/api/report-items/${second.json().id}`,
@@ -512,6 +574,42 @@ describe('authenticated weekly report workflow', () => {
       payload: { categoryId: operationsId, expectedVersion: 1 }
     });
     expect(assignArchived.statusCode).toBe(400);
+    const reorderIntoArchivedProject = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        ids: [second.json().id, first.json().id, third.json().id],
+        expectedReportVersion: 8,
+        move: {
+          itemId: second.json().id,
+          projectId: secondProject.json().id,
+          categoryId: developmentId,
+          expectedVersion: 1
+        }
+      }
+    });
+    expect(reorderIntoArchivedProject.statusCode).toBe(400);
+    expect(reorderIntoArchivedProject.json().error).toBe('INVALID_PROJECT');
+    const reorderIntoArchivedCategory = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        ids: [second.json().id, first.json().id, third.json().id],
+        expectedReportVersion: 8,
+        move: {
+          itemId: second.json().id,
+          projectId: firstProject.json().id,
+          categoryId: operationsId,
+          expectedVersion: 1
+        }
+      }
+    });
+    expect(reorderIntoArchivedCategory.statusCode).toBe(400);
+    expect(reorderIntoArchivedCategory.json().error).toBe('INVALID_CATEGORY');
     const foreignWorkspaceId = crypto.randomUUID();
     const foreignCategoryId = crypto.randomUUID();
     const timestamp = new Date().toISOString();

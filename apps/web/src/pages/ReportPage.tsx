@@ -663,8 +663,6 @@ function ReportSection({
     }
     const changedContainer =
       activeItem.projectId !== targetProjectId || activeItem.categoryId !== targetCategoryId;
-    const targetProject = projects.find((project) => project.id === targetProjectId);
-    if (targetProject?.archivedAt && activeItem.projectId !== targetProjectId) return;
     if (!changedContainer && oldIndex === targetIndex) return;
     const nextItems = arrayMove(orderedItems, oldIndex, targetIndex);
     const currentReportVersion =
