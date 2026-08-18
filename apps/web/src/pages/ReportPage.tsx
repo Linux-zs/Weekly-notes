@@ -46,6 +46,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../api';
 import { ErrorState, Loading, Modal, TagField } from '../components';
+import { createDeferredAction } from '../deferred-action';
 import {
   addDays,
   formatDate,
@@ -1426,6 +1427,7 @@ function ReportItemRow({
   const initial = useRef(!initialMeta.legacy);
   const skipNextSave = useRef(false);
   const clickTimer = useRef<number | undefined>(undefined);
+  const deferredSave = useRef(createDeferredAction()).current;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sortable = useSortable({
@@ -1459,7 +1461,13 @@ function ReportItemRow({
     item.type,
     item.version
   ]);
-  useEffect(() => () => window.clearTimeout(clickTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(clickTimer.current);
+      deferredSave.flush();
+    },
+    [deferredSave]
+  );
   const save = useMutation({
     mutationFn: () =>
       api<ReportItem>(`/api/report-items/${item.id}`, {
@@ -1505,11 +1513,18 @@ function ReportItemRow({
     }
     if (skipNextSave.current) {
       skipNextSave.current = false;
+      deferredSave.cancel();
       return;
     }
-    const timer = window.setTimeout(() => save.mutate(), 800);
-    return () => window.clearTimeout(timer);
+    setStatus('saving');
+    deferredSave.schedule(() => save.mutate(), 800);
   }, [content, itemMeta.progress, itemMeta.note, projectId, categoryId, itemType, occurredOn, tagKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (status !== 'saving') return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [status]);
   const attachments = useQuery({
     queryKey: ['attachments', item.id],
     queryFn: () => api<{ attachments: Attachment[] }>(`/api/report-items/${item.id}/attachments`),
@@ -1579,6 +1594,9 @@ function ReportItemRow({
       ref={sortable.setNodeRef}
       style={style}
       className={`report-table-row${sortable.isDragging ? ' item-dragging' : ''} ${status === 'conflict' ? 'item-conflict' : ''} ${status === 'error' ? 'item-save-error' : ''}`}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) deferredSave.flush();
+      }}
     >
       <div className="report-row-main">
         <button
