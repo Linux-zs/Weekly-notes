@@ -15,6 +15,7 @@ import type { CurrentUser } from '../types.js';
 import { isoWeekForDate, isoWeekRange } from '../lib/week.js';
 import { detectImage } from '../lib/image.js';
 import { config } from '../config.js';
+import { withStorageLock } from '../services/storage.js';
 
 const uuidParam = z.object({ id: z.string().uuid() });
 const weekParams = z.object({
@@ -710,30 +711,32 @@ export async function registerApi(app: FastifyInstance) {
     const attachmentId = id();
     const storedName = `${attachmentId}.${image.extension}`;
     const workspaceDirectory = path.join(config.uploadDir, user.workspaceId);
-    fs.mkdirSync(workspaceDirectory, { recursive: true });
     const storedPath = path.join(workspaceDirectory, storedName);
-    fs.writeFileSync(storedPath, buffer, { flag: 'wx' });
     const originalName = path.basename(upload.filename || 'image').slice(0, 255) || 'image';
-    try {
-      sqlite
-        .prepare(
-          'INSERT INTO report_attachments(id,workspace_id,author_id,report_item_id,original_name,stored_name,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?,?,?)'
-        )
-        .run(
-          attachmentId,
-          user.workspaceId,
-          user.id,
-          itemId,
-          originalName,
-          `${user.workspaceId}/${storedName}`,
-          image.mimeType,
-          buffer.length,
-          now()
-        );
-    } catch (error) {
-      removeStoredFile(storedPath, request.log, '附件入库失败，补偿删除已上传文件时发生错误');
-      throw error;
-    }
+    await withStorageLock(() => {
+      fs.mkdirSync(workspaceDirectory, { recursive: true });
+      fs.writeFileSync(storedPath, buffer, { flag: 'wx' });
+      try {
+        sqlite
+          .prepare(
+            'INSERT INTO report_attachments(id,workspace_id,author_id,report_item_id,original_name,stored_name,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?,?,?)'
+          )
+          .run(
+            attachmentId,
+            user.workspaceId,
+            user.id,
+            itemId,
+            originalName,
+            `${user.workspaceId}/${storedName}`,
+            image.mimeType,
+            buffer.length,
+            now()
+          );
+      } catch (error) {
+        removeStoredFile(storedPath, request.log, '附件入库失败，补偿删除已上传文件时发生错误');
+        throw error;
+      }
+    });
     return reply.code(201).send({ id: attachmentId, originalName, url: `/api/attachments/${attachmentId}` });
   });
   app.get('/api/attachments/:id', { preHandler: requireUser }, async (request, reply) => {
@@ -794,12 +797,14 @@ export async function registerApi(app: FastifyInstance) {
         error: 'ATTACHMENT_IN_USE',
         message: '附件仍被周报正文引用，请先移除正文中的引用'
       });
-    sqlite.prepare('DELETE FROM report_attachments WHERE id=?').run(attachmentId);
-    removeStoredFile(
-      path.join(config.uploadDir, attachment.storedName),
-      request.log,
-      '附件记录已删除，但文件清理失败'
-    );
+    await withStorageLock(() => {
+      sqlite.prepare('DELETE FROM report_attachments WHERE id=?').run(attachmentId);
+      removeStoredFile(
+        path.join(config.uploadDir, attachment.storedName),
+        request.log,
+        '附件记录已删除，但文件清理失败'
+      );
+    });
     return reply.code(204).send();
   });
   app.delete('/api/report-items/:id', { preHandler: requireUser }, async (request, reply) => {
@@ -831,19 +836,21 @@ export async function registerApi(app: FastifyInstance) {
         error: 'ITEM_ATTACHMENTS_IN_USE',
         message: '该条目的附件仍被其他周报引用，请先移除引用'
       });
-    sqlite.transaction(() => {
-      sqlite.prepare('DELETE FROM report_items WHERE id=?').run(itemId);
-      sqlite
-        .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
-        .run(now(), row.report_id);
-    })();
-    attachments.forEach((attachment) =>
-      removeStoredFile(
-        path.join(config.uploadDir, attachment.storedName),
-        request.log,
-        '周报条目已删除，但附件文件清理失败'
-      )
-    );
+    await withStorageLock(() => {
+      sqlite.transaction(() => {
+        sqlite.prepare('DELETE FROM report_items WHERE id=?').run(itemId);
+        sqlite
+          .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
+          .run(now(), row.report_id);
+      })();
+      attachments.forEach((attachment) =>
+        removeStoredFile(
+          path.join(config.uploadDir, attachment.storedName),
+          request.log,
+          '周报条目已删除，但附件文件清理失败'
+        )
+      );
+    });
     return reply.code(204).send();
   });
   app.post('/api/reports/:id/reorder', { preHandler: requireUser }, async (request, reply) => {

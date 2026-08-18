@@ -312,11 +312,33 @@ describe('authenticated weekly report workflow', () => {
     const backup = await createBackup();
     expect(fs.existsSync(path.join(backup, 'zhoubao.sqlite'))).toBe(true);
     expect(fs.existsSync(path.join(backup, 'manifest.json'))).toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(backup, 'manifest.json'), 'utf8')).integrity).toMatchObject({
+      verified: true,
+      attachments: 1,
+      verifiedFiles: 1
+    });
     expect(
       fs
         .readdirSync(path.join(backup, 'uploads'), { recursive: true })
         .some((entry) => String(entry).endsWith('.png'))
     ).toBe(true);
+    const stored = sqlite
+      .prepare('SELECT stored_name AS storedName FROM report_attachments WHERE id=?')
+      .get(uploaded.json().id) as { storedName: string };
+    const storedPath = path.join(process.env.UPLOAD_DIR!, stored.storedName);
+    const heldPath = `${storedPath}.held`;
+    fs.renameSync(storedPath, heldPath);
+    try {
+      await expect(createBackup()).rejects.toThrow('BACKUP_FILES_MISSING');
+    } finally {
+      fs.renameSync(heldPath, storedPath);
+    }
+    expect(fs.readdirSync(process.env.BACKUP_DIR!).some((entry) => entry.endsWith('.tmp'))).toBe(false);
+    sqlite.prepare("DELETE FROM app_state WHERE key IN ('last_daily_backup','daily_backup_claim')").run();
+    const { runScheduledBackup } = await import('./services/backup.js');
+    const scheduledAt = new Date('2026-08-18T20:00:00.000Z');
+    expect(await runScheduledBackup(app.log, scheduledAt)).toBe(true);
+    expect(await runScheduledBackup(app.log, scheduledAt)).toBe(false);
     const holidayImport = await app.inject({
       method: 'POST',
       url: '/api/settings/holidays/2026/import',

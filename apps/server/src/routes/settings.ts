@@ -8,6 +8,7 @@ import { id, now, sqlite } from '../db/index.js';
 import { detectImage } from '../lib/image.js';
 import { requireUser } from '../types.js';
 import { ensureWorkspaceForUser } from '../auth.js';
+import { withStorageLock } from '../services/storage.js';
 
 function validateTimezone(value: string) {
   try {
@@ -108,16 +109,18 @@ export async function registerSettings(app: FastifyInstance) {
     const directory = avatarDirectory();
     const target = path.join(directory, file);
     const avatarUrl = `${avatarUrlPrefix}${file}`;
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(target, buffer, { flag: 'wx' });
-    try {
-      sqlite.prepare('UPDATE users SET avatar_url=?,updated_at=? WHERE id=?').run(avatarUrl, now(), userId);
-    } catch (error) {
-      fs.rmSync(target, { force: true });
-      throw error;
-    }
-    const previous = localAvatarPath(current.avatarUrl);
-    if (previous) fs.rmSync(previous, { force: true });
+    await withStorageLock(() => {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(target, buffer, { flag: 'wx' });
+      try {
+        sqlite.prepare('UPDATE users SET avatar_url=?,updated_at=? WHERE id=?').run(avatarUrl, now(), userId);
+      } catch (error) {
+        fs.rmSync(target, { force: true });
+        throw error;
+      }
+      const previous = localAvatarPath(current.avatarUrl);
+      if (previous) fs.rmSync(previous, { force: true });
+    });
     return reply.code(201).send({ avatarUrl });
   });
   app.get('/api/profile-avatars/:file', { preHandler: requireUser }, async (request, reply) => {
