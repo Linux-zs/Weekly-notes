@@ -209,7 +209,6 @@ export function ReportPage({ user }: { user: User }) {
     );
 
   const data = report.data!;
-  const activeProjects = projects.data!.projects.filter((project) => !project.archivedAt);
   const activeType = sections[activeSection];
   const move = (delta: number) => {
     const next = isoWeekForDate(addDays(data.weekStart, delta * 7));
@@ -280,7 +279,7 @@ export function ReportPage({ user }: { user: User }) {
           type={activeType}
           items={data.items.filter((item) => item.type === activeType)}
           report={data}
-          projects={activeProjects}
+          projects={projects.data!.projects}
           categories={categories.data!.categories}
           onAdd={(projectId, categoryId) => addMutation.mutate({ type: activeType, projectId, categoryId })}
           onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
@@ -298,7 +297,7 @@ export function ReportPage({ user }: { user: User }) {
             type="other"
             items={data.items.filter((item) => item.type === 'other')}
             report={data}
-            projects={activeProjects}
+            projects={projects.data!.projects}
             categories={categories.data!.categories}
             onAdd={(projectId, categoryId) => addMutation.mutate({ type: 'other', projectId, categoryId })}
             onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
@@ -655,6 +654,8 @@ function ReportSection({
     }
     const changedContainer =
       activeItem.projectId !== targetProjectId || activeItem.categoryId !== targetCategoryId;
+    const targetProject = projects.find((project) => project.id === targetProjectId);
+    if (targetProject?.archivedAt && activeItem.projectId !== targetProjectId) return;
     if (!changedContainer && oldIndex === targetIndex) return;
     const nextItems = arrayMove(orderedItems, oldIndex, targetIndex);
     reorder.mutate({
@@ -850,9 +851,11 @@ function ProjectReportGroup({
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryError, setNewCategoryError] = useState('');
+  const projectArchived = Boolean(group.project?.archivedAt);
   const projectDrop = useDroppable({
     id: `project-drop:${group.key}`,
-    data: { kind: 'project', projectId: group.project?.id ?? null }
+    data: { kind: 'project', projectId: group.project?.id ?? null },
+    disabled: projectArchived
   });
   useEffect(() => setProjectName(group.project?.name ?? ''), [group.project?.id, group.project?.name]);
   const saveProjectName = useMutation({
@@ -967,6 +970,7 @@ function ProjectReportGroup({
           )}
         </div>
         <span>{group.items.length} 条</span>
+        {projectArchived && <small>已停用</small>}
       </div>
       {saveProjectName.error && (
         <div className="page-action-error">项目名称保存失败：{saveProjectName.error.message}</div>
@@ -983,48 +987,51 @@ function ProjectReportGroup({
             sequenceById={sequenceById}
             onCreateCategory={onCreateCategory}
             onImport={onImport}
+            projectArchived={projectArchived}
           />
         ))}
-        <div className="project-add-row">
-          <div className={`project-category-add${addingCategory ? ' editing' : ''}`}>
-            {addingCategory ? (
-              <>
-                <input
-                  autoFocus
-                  value={newCategoryName}
-                  onChange={(event) => setNewCategoryName(event.target.value)}
-                  onBlur={finishNewCategory}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') event.currentTarget.blur();
-                    if (event.key === 'Escape') cancelNewCategory();
+        {!projectArchived && (
+          <div className="project-add-row">
+            <div className={`project-category-add${addingCategory ? ' editing' : ''}`}>
+              {addingCategory ? (
+                <>
+                  <input
+                    autoFocus
+                    value={newCategoryName}
+                    onChange={(event) => setNewCategoryName(event.target.value)}
+                    onBlur={finishNewCategory}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') event.currentTarget.blur();
+                      if (event.key === 'Escape') cancelNewCategory();
+                    }}
+                    maxLength={40}
+                    placeholder="分类名称"
+                    aria-label={`为${group.project?.name ?? '未归属'}新增分类`}
+                    disabled={createProjectCategory.isPending}
+                  />
+                  {(newCategoryError || createProjectCategory.error) && (
+                    <small>{newCategoryError || createProjectCategory.error?.message}</small>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    createProjectCategory.reset();
+                    setNewCategoryError('');
+                    setAddingCategory(true);
                   }}
-                  maxLength={40}
-                  placeholder="分类名称"
-                  aria-label={`为${group.project?.name ?? '未归属'}新增分类`}
-                  disabled={createProjectCategory.isPending}
-                />
-                {(newCategoryError || createProjectCategory.error) && (
-                  <small>{newCategoryError || createProjectCategory.error?.message}</small>
-                )}
-              </>
-            ) : (
-              <button
-                onClick={() => {
-                  createProjectCategory.reset();
-                  setNewCategoryError('');
-                  setAddingCategory(true);
-                }}
-              >
-                <Plus size={12} />
-                新增分类
-              </button>
-            )}
+                >
+                  <Plus size={12} />
+                  新增分类
+                </button>
+              )}
+            </div>
+            <button className="project-row-add" onClick={() => onAdd(defaultCategoryId)}>
+              <Plus size={13} />
+              添加一条
+            </button>
           </div>
-          <button className="project-row-add" onClick={() => onAdd(defaultCategoryId)}>
-            <Plus size={13} />
-            添加一条
-          </button>
-        </div>
+        )}
       </div>
     </section>
   );
@@ -1038,7 +1045,8 @@ function CategoryReportGroup({
   categories,
   sequenceById,
   onCreateCategory,
-  onImport
+  onImport,
+  projectArchived
 }: {
   group: CategoryItemGroup;
   projectId: string | null;
@@ -1048,6 +1056,7 @@ function CategoryReportGroup({
   sequenceById: Map<string, number>;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
   onImport: () => void;
+  projectArchived: boolean;
 }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
@@ -1055,7 +1064,8 @@ function CategoryReportGroup({
   const [categoryError, setCategoryError] = useState('');
   const drop = useDroppable({
     id: `category-drop:${projectId ?? 'unassigned'}:${group.key}`,
-    data: { kind: 'category', projectId, categoryId: group.category?.id ?? null }
+    data: { kind: 'category', projectId, categoryId: group.category?.id ?? null },
+    disabled: projectArchived
   });
   useEffect(() => {
     if (!renaming) setCategoryName(group.category?.name ?? '');
@@ -1859,11 +1869,14 @@ function ReportItemRow({
                 所属项目
                 <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
                   <option value="">未归属项目</option>
-                  {projects.map((project) => (
-                    <option value={project.id} key={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
+                  {projects
+                    .filter((project) => !project.archivedAt || project.id === projectId)
+                    .map((project) => (
+                      <option value={project.id} key={project.id} disabled={Boolean(project.archivedAt)}>
+                        {project.name}
+                        {project.archivedAt ? '（已停用）' : ''}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label>

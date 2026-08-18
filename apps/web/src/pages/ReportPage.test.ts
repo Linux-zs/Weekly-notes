@@ -56,6 +56,28 @@ describe('weekly report category presentation', () => {
     expect(groups[0]?.categoryGroups[0]?.items.map((entry) => entry.id)).toEqual(['dev-1', 'dev-2']);
   });
 
+  it('keeps archived project names in historical report groups', () => {
+    const archivedProject: Project = {
+      id: 'project-archived',
+      name: '历史项目',
+      color: '#61758A',
+      archivedAt: '2026-08-17T00:00:00Z',
+      position: 1
+    };
+    const archivedItem = { ...item('archived-item', 'development'), projectId: archivedProject.id };
+
+    const groups = groupItemsByProjectAndCategory(
+      [archivedItem, { ...item('unassigned', null), projectId: null }],
+      [...projects, archivedProject],
+      categories
+    );
+
+    expect(groups.find((group) => group.key === archivedProject.id)?.project?.name).toBe('历史项目');
+    expect(groups.find((group) => group.key === 'unassigned')?.items.map((entry) => entry.id)).toEqual([
+      'unassigned'
+    ]);
+  });
+
   it('prefixes copied entries with their category name', () => {
     const report: WeeklyReport = {
       id: 'report',
