@@ -222,14 +222,63 @@ export async function registerCatalog(app: FastifyInstance) {
         timestamp,
         timestamp
       );
-    return reply.code(201).send({ id: projectId, ...input, archivedAt: null });
+    return reply.code(201).send({ id: projectId, ...input, position: max.position, archivedAt: null });
+  });
+
+  app.post('/api/projects/reorder', { preHandler: requireUser }, async (request, reply) => {
+    const input = z
+      .object({
+        ids: z.array(z.string().uuid()).max(500),
+        expectedIds: z.array(z.string().uuid()).max(500)
+      })
+      .parse(request.body);
+    if (
+      new Set(input.ids).size !== input.ids.length ||
+      new Set(input.expectedIds).size !== input.expectedIds.length
+    )
+      return reply.code(400).send({ error: 'INVALID_PROJECT_ORDER' });
+    const workspaceId = request.currentUser!.workspaceId;
+    try {
+      sqlite.transaction(() => {
+        const currentIds = (
+          sqlite
+            .prepare(
+              'SELECT id FROM projects WHERE workspace_id=? AND archived_at IS NULL ORDER BY position,name COLLATE NOCASE'
+            )
+            .all(workspaceId) as Array<{ id: string }>
+        ).map((project) => project.id);
+        if (
+          input.ids.length !== currentIds.length ||
+          input.expectedIds.length !== currentIds.length ||
+          currentIds.some((projectId) => !input.ids.includes(projectId))
+        )
+          throw new Error('INVALID_PROJECT_ORDER');
+        if (currentIds.some((projectId, index) => input.expectedIds[index] !== projectId))
+          throw new Error('PROJECT_ORDER_CONFLICT');
+        const update = sqlite.prepare(
+          'UPDATE projects SET position=?,updated_at=? WHERE id=? AND workspace_id=? AND archived_at IS NULL'
+        );
+        const timestamp = now();
+        input.ids.forEach((projectId, position) => update.run(position, timestamp, projectId, workspaceId));
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message === 'PROJECT_ORDER_CONFLICT')
+        return reply.code(409).send({
+          error: 'PROJECT_ORDER_CONFLICT',
+          message: '项目顺序已发生变化，请刷新后重试'
+        });
+      if (error instanceof Error && error.message === 'INVALID_PROJECT_ORDER')
+        return reply.code(400).send({ error: 'INVALID_PROJECT_ORDER' });
+      throw error;
+    }
+    return { ids: input.ids };
   });
 
   app.patch('/api/projects/:id', { preHandler: requireUser }, async (request, reply) => {
     const { id: projectId } = uuidParam.parse(request.params);
     const input = projectInputSchema
       .partial()
-      .extend({ archived: z.boolean().optional(), position: z.number().int().min(0).optional() })
+      .extend({ archived: z.boolean().optional() })
       .parse(request.body);
     const current = sqlite
       .prepare('SELECT name,color,position,archived_at FROM projects WHERE id=? AND workspace_id=?')
@@ -240,7 +289,7 @@ export async function registerCatalog(app: FastifyInstance) {
       .run(
         input.name ?? current.name,
         input.color ?? current.color,
-        input.position ?? current.position,
+        current.position,
         input.archived === undefined ? current.archived_at : input.archived ? now() : null,
         now(),
         projectId

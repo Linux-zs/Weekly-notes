@@ -56,6 +56,43 @@ describe('authenticated weekly report workflow', () => {
     expect(response.json().issues).toEqual(expect.any(Array));
   });
 
+  it('reorders the complete active project catalog atomically and rejects stale orders', async () => {
+    for (const name of ['排序项目甲', '排序项目乙'])
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/projects',
+            headers: headers(),
+            payload: { name, color: '#345B9B' }
+          })
+        ).statusCode
+      ).toBe(201);
+    const before = await app.inject({ method: 'GET', url: '/api/projects', headers: headers() });
+    const expectedIds = (before.json().projects as Array<{ id: string; archivedAt: string | null }>)
+      .filter((project) => !project.archivedAt)
+      .map((project) => project.id);
+    const ids = [...expectedIds].reverse();
+
+    const reordered = await app.inject({
+      method: 'POST',
+      url: '/api/projects/reorder',
+      headers: headers(),
+      payload: { ids, expectedIds }
+    });
+    expect(reordered.statusCode).toBe(200);
+    expect(reordered.json().ids).toEqual(ids);
+
+    const stale = await app.inject({
+      method: 'POST',
+      url: '/api/projects/reorder',
+      headers: headers(),
+      payload: { ids: expectedIds, expectedIds }
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error).toBe('PROJECT_ORDER_CONFLICT');
+  });
+
   it('provisions an uninvited external identity with a personal workspace', async () => {
     const { provisionLoginIdentity } = await import('./auth.js');
     const subject = `microsoft-${crypto.randomUUID()}`;

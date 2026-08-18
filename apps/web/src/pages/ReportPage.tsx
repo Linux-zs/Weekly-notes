@@ -487,7 +487,15 @@ export function groupItemsByProjectAndCategory(
       );
     });
   }
-  return [...groups.values()];
+  return [...groups.values()].sort((left, right) => {
+    if (!left.project) return 1;
+    if (!right.project) return -1;
+    return (
+      Number(Boolean(left.project.archivedAt)) - Number(Boolean(right.project.archivedAt)) ||
+      left.project.position - right.project.position ||
+      left.project.name.localeCompare(right.project.name, 'zh-CN')
+    );
+  });
 }
 
 export function lastActiveCategoryId(group: ProjectItemGroup) {

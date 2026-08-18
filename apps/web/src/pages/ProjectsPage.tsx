@@ -25,13 +25,8 @@ export function ProjectSettings() {
     }
   });
   const updateProject = useMutation({
-    mutationFn: ({
-      id,
-      body
-    }: {
-      id: string;
-      body: Partial<ProjectDraft> & { archived?: boolean; position?: number };
-    }) => api(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, body }: { id: string; body: Partial<ProjectDraft> & { archived?: boolean } }) =>
+      api(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] })
   });
   const saveEdit = useMutation({
@@ -49,18 +44,8 @@ export function ProjectSettings() {
     }
   });
   const reorder = useMutation({
-    mutationFn: async ({ project, target }: { project: Project; target: Project }) => {
-      await Promise.all([
-        api(`/api/projects/${project.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ position: target.position })
-        }),
-        api(`/api/projects/${target.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ position: project.position })
-        })
-      ]);
-    },
+    mutationFn: ({ ids, expectedIds }: { ids: string[]; expectedIds: string[] }) =>
+      api('/api/projects/reorder', { method: 'POST', body: JSON.stringify({ ids, expectedIds }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] })
   });
   if (projects.isLoading)
@@ -77,6 +62,14 @@ export function ProjectSettings() {
     );
   const active = projects.data!.projects.filter((project) => !project.archivedAt);
   const archived = projects.data!.projects.filter((project) => project.archivedAt);
+  const moveProject = (list: Project[], index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= list.length) return;
+    const expectedIds = list.map((project) => project.id);
+    const ids = [...expectedIds];
+    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
+    reorder.mutate({ ids, expectedIds });
+  };
   const openCreate = () => {
     setDraft({ name: '', color: palette[0] });
     setEditor(null);
@@ -99,7 +92,7 @@ export function ProjectSettings() {
               className="icon-button"
               aria-label="上移"
               disabled={index === 0 || reorder.isPending}
-              onClick={() => reorder.mutate({ project, target: list[index - 1]! })}
+              onClick={() => moveProject(list, index, -1)}
             >
               <ArrowUp size={15} />
             </button>
@@ -107,7 +100,7 @@ export function ProjectSettings() {
               className="icon-button"
               aria-label="下移"
               disabled={index === list.length - 1 || reorder.isPending}
-              onClick={() => reorder.mutate({ project, target: list[index + 1]! })}
+              onClick={() => moveProject(list, index, 1)}
             >
               <ArrowDown size={15} />
             </button>
@@ -212,7 +205,7 @@ export function ProjectSettings() {
             </div>
             <div>
               <strong>{deleteProject.name}</strong>
-              <p>删除后，关联的周报条目会变为未归属。</p>
+              <p>只有从未被周报引用的项目才能永久删除。</p>
             </div>
           </div>
           {remove.error && <div className="delete-error">{remove.error.message}</div>}

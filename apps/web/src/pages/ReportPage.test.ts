@@ -78,6 +78,30 @@ describe('weekly report category presentation', () => {
     ]);
   });
 
+  it('orders project groups by active state and configured position with unassigned last', () => {
+    const second: Project = {
+      id: 'project-b',
+      name: '项目乙',
+      color: '#61758A',
+      archivedAt: null,
+      position: 0
+    };
+    const first = { ...projects[0]!, position: 2 };
+    const archived = { ...first, id: 'project-old', name: '历史项目', archivedAt: '2026-08-01T00:00:00Z' };
+    const groups = groupItemsByProjectAndCategory(
+      [
+        { ...item('first', null), projectId: first.id },
+        { ...item('none', null), projectId: null },
+        { ...item('old', null), projectId: archived.id },
+        { ...item('second', null), projectId: second.id }
+      ],
+      [first, second, archived],
+      categories
+    );
+
+    expect(groups.map((group) => group.key)).toEqual([second.id, first.id, archived.id, 'unassigned']);
+  });
+
   it('prefixes copied entries with their category name', () => {
     const report: WeeklyReport = {
       id: 'report',
