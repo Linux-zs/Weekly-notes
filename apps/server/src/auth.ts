@@ -371,7 +371,7 @@ export async function registerAuth(app: FastifyInstance) {
     if (!raw) return;
     let row = sqlite
       .prepare(
-        `SELECT u.id,u.display_name,u.email,u.avatar_url,wm.workspace_id,wm.role
+        `SELECT u.id,u.display_name,u.email,u.avatar_url,u.timezone,wm.workspace_id,wm.role
       FROM sessions s JOIN users u ON u.id=s.user_id JOIN workspace_members wm ON wm.user_id=u.id AND wm.workspace_id=COALESCE(s.workspace_id,(SELECT workspace_id FROM workspace_members WHERE user_id=u.id ORDER BY created_at LIMIT 1))
       WHERE s.token_hash=? AND s.expires_at>? ORDER BY wm.created_at LIMIT 1`
       )
@@ -381,6 +381,7 @@ export async function registerAuth(app: FastifyInstance) {
           display_name: string;
           email: string | null;
           avatar_url: string | null;
+          timezone: string;
           workspace_id: string;
           role: 'owner' | 'member';
         }
@@ -388,12 +389,19 @@ export async function registerAuth(app: FastifyInstance) {
     if (!row) {
       const sessionUser = sqlite
         .prepare(
-          `SELECT u.id,u.display_name,u.email,u.avatar_url
+          `SELECT u.id,u.display_name,u.email,u.avatar_url,u.timezone
            FROM sessions s JOIN users u ON u.id=s.user_id
            WHERE s.token_hash=? AND s.expires_at>?`
         )
         .get(sha256(raw), now()) as
-        { id: string; display_name: string; email: string | null; avatar_url: string | null } | undefined;
+        | {
+            id: string;
+            display_name: string;
+            email: string | null;
+            avatar_url: string | null;
+            timezone: string;
+          }
+        | undefined;
       if (sessionUser) {
         const workspaceId = sqlite.transaction(() => ensureWorkspaceForUser(sessionUser.id))();
         row = {
@@ -409,6 +417,7 @@ export async function registerAuth(app: FastifyInstance) {
       displayName: row.display_name,
       email: row.email,
       avatarUrl: row.avatar_url,
+      timezone: row.timezone,
       workspaceId: row.workspace_id,
       role: row.role
     };

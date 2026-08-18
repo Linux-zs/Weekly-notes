@@ -56,6 +56,24 @@ describe('authenticated weekly report workflow', () => {
     expect(response.json().issues).toEqual(expect.any(Array));
   });
 
+  it('returns the saved timezone in the current user contract', async () => {
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: '/api/settings/profile',
+      headers: headers(),
+      payload: { displayName: '周报主人', timezone: 'UTC' }
+    });
+    const me = await app.inject({ method: 'GET', url: '/api/me', headers: headers() });
+    expect(updated.statusCode).toBe(200);
+    expect(me.json().user.timezone).toBe('UTC');
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/settings/profile',
+      headers: headers(),
+      payload: { displayName: '周报主人', timezone: 'Asia/Shanghai' }
+    });
+  });
+
   it('rejects unknown tags without changing the item or report version', async () => {
     const report = await app.inject({
       method: 'PUT',

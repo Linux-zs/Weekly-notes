@@ -65,14 +65,20 @@ import {
   sectionLabels,
   setAttachmentImageWidth,
   stripMarkdownImages,
-  todayShanghai,
+  todayInTimezone,
   weeksInIsoYear
 } from '../lib';
 
 const sections: ReportItemType[] = ['completed', 'next_plan'];
 const copySections: ReportItemType[] = ['completed', 'other', 'next_plan'];
 const projectColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
-type User = { id: string; displayName: string; email: string | null; avatarUrl: string | null };
+type User = {
+  id: string;
+  displayName: string;
+  email: string | null;
+  avatarUrl: string | null;
+  timezone: string;
+};
 type ReportWeekSummary = { year: number; weeks: Array<{ weekNumber: number; itemCount: number }> };
 type CategoryItemGroup = {
   key: string;
@@ -121,7 +127,7 @@ function itemDraft(item: ReportItem): ItemDraft {
 
 export function ReportPage({ user }: { user: User }) {
   const params = useParams();
-  const current = isoWeekForDate(todayShanghai());
+  const current = isoWeekForDate(todayInTimezone(user.timezone));
   const year = Number(params.year) || current.year;
   const week = Number(params.week) || current.week;
   const [activeSection, setActiveSection] = useState(0);

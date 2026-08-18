@@ -103,13 +103,29 @@ export function isoWeekForDate(value: string) {
 export function weeksInIsoYear(year: number) {
   return isoWeekForDate(`${year}-12-28`).week;
 }
-export function todayShanghai() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(new Date());
+export function todayInTimezone(timeZone: string, current = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(current);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(current);
+  }
+}
+export function browserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+  } catch {
+    return 'Asia/Shanghai';
+  }
 }
 export function weekRangeForDate(value: string) {
   const date = new Date(`${value}T00:00:00Z`);

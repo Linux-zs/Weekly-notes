@@ -6,6 +6,7 @@ import {
   isoWeekForDate,
   setAttachmentImageWidth,
   stripMarkdownImages,
+  todayInTimezone,
   weekRangeForDate,
   weeksInIsoYear
 } from './lib';
@@ -17,6 +18,15 @@ describe('weekly date helpers', () => {
   });
   it('returns a Monday to Sunday range', () => {
     expect(weekRangeForDate('2026-08-11')).toEqual({ weekStart: '2026-08-10', weekEnd: '2026-08-16' });
+  });
+  it('uses the selected timezone across an ISO week boundary', () => {
+    const current = new Date('2026-01-04T23:30:00.000Z');
+    expect(todayInTimezone('UTC', current)).toBe('2026-01-04');
+    expect(todayInTimezone('Asia/Hong_Kong', current)).toBe('2026-01-05');
+    expect(todayInTimezone('Asia/Shanghai', current)).toBe('2026-01-05');
+  });
+  it('falls back safely for an invalid timezone', () => {
+    expect(todayInTimezone('Invalid/Timezone', new Date('2026-01-04T23:30:00.000Z'))).toBe('2026-01-05');
   });
   it('adds days across month boundaries', () => {
     expect(addDays('2026-08-31', 1)).toBe('2026-09-01');

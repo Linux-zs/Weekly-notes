@@ -4,7 +4,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, ApiError } from './api';
 import { Loading } from './components';
-import { formatDate, isoWeekForDate, todayShanghai, weekRangeForDate } from './lib';
+import { browserTimezone, formatDate, isoWeekForDate, todayInTimezone, weekRangeForDate } from './lib';
 
 const ReportPage = lazy(() =>
   import('./pages/ReportPage').then((module) => ({ default: module.ReportPage }))
@@ -22,6 +22,7 @@ type Me = {
     displayName: string;
     email: string | null;
     avatarUrl: string | null;
+    timezone: string;
     workspaceId: string;
     role: string;
   };
@@ -158,7 +159,7 @@ function LoginPage() {
     apple: 'Apple'
   };
   const error = new URLSearchParams(location.search).get('error');
-  const today = todayShanghai();
+  const today = todayInTimezone(browserTimezone());
   const current = isoWeekForDate(today);
   const range = weekRangeForDate(today);
   return (
