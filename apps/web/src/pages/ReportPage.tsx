@@ -584,6 +584,7 @@ function ReportSection({
   const reorder = useMutation({
     mutationFn: (payload: {
       ids: string[];
+      expectedReportVersion: number;
       move?: {
         itemId: string;
         projectId: string | null;
@@ -591,10 +592,13 @@ function ReportSection({
         expectedVersion: number;
       };
     }) =>
-      api(`/api/reports/${report.id}/reorder`, {
-        method: 'POST',
-        body: JSON.stringify({ type, ...payload })
-      }),
+      api<{ ok: boolean; movedItem: ReportItem | null; reportVersion: number }>(
+        `/api/reports/${report.id}/reorder`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ type, ...payload })
+        }
+      ),
     onMutate: async (payload) => {
       const queryKey = ['report', report.weekYear, report.weekNumber] as const;
       await qc.cancelQueries({ queryKey });
@@ -617,6 +621,11 @@ function ReportSection({
     onError: (_error, _payload, context) => {
       if (context?.previous)
         qc.setQueryData(['report', report.weekYear, report.weekNumber], context.previous);
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
+        old ? { ...old, version: data.reportVersion } : old
+      );
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] })
   });
@@ -658,8 +667,12 @@ function ReportSection({
     if (targetProject?.archivedAt && activeItem.projectId !== targetProjectId) return;
     if (!changedContainer && oldIndex === targetIndex) return;
     const nextItems = arrayMove(orderedItems, oldIndex, targetIndex);
+    const currentReportVersion =
+      qc.getQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber])?.version ??
+      report.version;
     reorder.mutate({
       ids: nextItems.map((item) => item.id),
+      expectedReportVersion: currentReportVersion,
       move: changedContainer
         ? {
             itemId: activeItem.id,
@@ -1528,11 +1541,12 @@ function ReportItemRow({
   }, [deferredSave]);
   saveTaskHandler.current = async (task) => {
     try {
-      const data = await api<ReportItem>(`/api/report-items/${item.id}`, {
+      const data = await api<ReportItem & { reportVersion: number }>(`/api/report-items/${item.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ ...task.draft, expectedVersion: version.current })
       });
-      version.current = data.version;
+      const { reportVersion, ...savedItem } = data;
+      version.current = savedItem.version;
       acknowledgedRevision.current = Math.max(acknowledgedRevision.current, task.revision);
       if (mounted.current) {
         setConflictCurrent(null);
@@ -1541,7 +1555,11 @@ function ReportItemRow({
       localStorage.removeItem(`weekly-notes:item-meta:${item.id}`);
       qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
         old
-          ? { ...old, items: old.items.map((existing) => (existing.id === data.id ? data : existing)) }
+          ? {
+              ...old,
+              version: reportVersion,
+              items: old.items.map((existing) => (existing.id === savedItem.id ? savedItem : existing))
+            }
           : old
       );
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
@@ -1630,7 +1648,13 @@ function ReportItemRow({
     onSuccess: () => {
       localStorage.removeItem(`weekly-notes:item-meta:${item.id}`);
       qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
-        old ? { ...old, items: old.items.filter((existing) => existing.id !== item.id) } : old
+        old
+          ? {
+              ...old,
+              version: old.version + 1,
+              items: old.items.filter((existing) => existing.id !== item.id)
+            }
+          : old
       );
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
     }

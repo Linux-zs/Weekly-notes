@@ -665,7 +665,12 @@ export async function registerApi(app: FastifyInstance) {
         'SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
       )
       .get(itemId) as ReportItemRow;
-    return serializeReportItem(row);
+    const reportVersion = (
+      sqlite.prepare('SELECT version FROM weekly_reports WHERE id=?').get(current.report_id) as {
+        version: number;
+      }
+    ).version;
+    return { ...serializeReportItem(row), reportVersion };
   });
   app.post('/api/report-items/:id/images', { preHandler: requireUser }, async (request, reply) => {
     const { id: itemId } = uuidParam.parse(request.params);
@@ -794,6 +799,7 @@ export async function registerApi(app: FastifyInstance) {
       .object({
         type: z.enum(reportItemTypes),
         ids: z.array(z.string().uuid()),
+        expectedReportVersion: z.number().int().positive(),
         move: z
           .object({
             itemId: z.string().uuid(),
@@ -806,9 +812,15 @@ export async function registerApi(app: FastifyInstance) {
       .parse(request.body);
     const user = request.currentUser!;
     const report = sqlite
-      .prepare('SELECT 1 FROM weekly_reports WHERE id=? AND workspace_id=? AND author_id=?')
-      .get(reportId, user.workspaceId, user.id);
+      .prepare('SELECT version FROM weekly_reports WHERE id=? AND workspace_id=? AND author_id=?')
+      .get(reportId, user.workspaceId, user.id) as { version: number } | undefined;
     if (!report) return reply.code(404).send({ error: 'NOT_FOUND' });
+    if (report.version !== body.expectedReportVersion)
+      return reply.code(409).send({
+        error: 'REPORT_VERSION_CONFLICT',
+        message: '周报已发生变化，请刷新后重试',
+        currentVersion: report.version
+      });
     const currentItems = sqlite
       .prepare('SELECT id FROM report_items WHERE report_id=? AND type=?')
       .all(reportId, body.type) as Array<{ id: string }>;
@@ -837,28 +849,53 @@ export async function registerApi(app: FastifyInstance) {
     const updatePosition = sqlite.prepare(
       'UPDATE report_items SET position=?,updated_at=? WHERE id=? AND report_id=? AND type=?'
     );
-    sqlite.transaction(() => {
-      if (body.move) {
-        const result = sqlite
-          .prepare(
-            'UPDATE report_items SET project_id=?,category_id=?,version=version+1,updated_at=? WHERE id=? AND report_id=? AND type=? AND version=?'
-          )
-          .run(
-            body.move.projectId,
-            body.move.categoryId,
-            timestamp,
-            body.move.itemId,
-            reportId,
-            body.type,
-            body.move.expectedVersion
-          );
-        if (!result.changes) throw new Error('VERSION_CONFLICT');
+    try {
+      sqlite.transaction(() => {
+        if (body.move) {
+          const result = sqlite
+            .prepare(
+              'UPDATE report_items SET project_id=?,category_id=?,version=version+1,updated_at=? WHERE id=? AND report_id=? AND type=? AND version=?'
+            )
+            .run(
+              body.move.projectId,
+              body.move.categoryId,
+              timestamp,
+              body.move.itemId,
+              reportId,
+              body.type,
+              body.move.expectedVersion
+            );
+          if (!result.changes) throw new Error('VERSION_CONFLICT');
+        }
+        body.ids.forEach((itemId, index) =>
+          updatePosition.run(index, timestamp, itemId, reportId, body.type)
+        );
+        const reportUpdate = sqlite
+          .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=? AND version=?')
+          .run(timestamp, reportId, body.expectedReportVersion);
+        if (!reportUpdate.changes) throw new Error('REPORT_VERSION_CONFLICT');
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message === 'REPORT_VERSION_CONFLICT') {
+        const currentReport = sqlite
+          .prepare('SELECT version FROM weekly_reports WHERE id=?')
+          .get(reportId) as { version: number };
+        return reply.code(409).send({
+          error: 'REPORT_VERSION_CONFLICT',
+          message: '周报已发生变化，请刷新后重试',
+          currentVersion: currentReport.version
+        });
       }
-      body.ids.forEach((itemId, index) => updatePosition.run(index, timestamp, itemId, reportId, body.type));
-      sqlite
-        .prepare('UPDATE weekly_reports SET version=version+1,updated_at=? WHERE id=?')
-        .run(timestamp, reportId);
-    })();
+      if (error instanceof Error && error.message === 'VERSION_CONFLICT' && body.move) {
+        const currentItem = sqlite
+          .prepare(
+            'SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE id=?'
+          )
+          .get(body.move.itemId) as ReportItemRow;
+        return reply.code(409).send({ error: 'VERSION_CONFLICT', current: serializeReportItem(currentItem) });
+      }
+      throw error;
+    }
     const movedItem = body.move
       ? (sqlite
           .prepare(
@@ -866,7 +903,11 @@ export async function registerApi(app: FastifyInstance) {
           )
           .get(body.move.itemId) as ReportItemRow)
       : null;
-    return { ok: true, movedItem: movedItem ? serializeReportItem(movedItem) : null };
+    return {
+      ok: true,
+      movedItem: movedItem ? serializeReportItem(movedItem) : null,
+      reportVersion: body.expectedReportVersion + 1
+    };
   });
 
   app.get('/api/search', { preHandler: requireUser }, async (request) => {

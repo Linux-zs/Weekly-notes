@@ -451,6 +451,7 @@ describe('authenticated weekly report workflow', () => {
       payload: {
         type: 'completed',
         ids: [second.json().id, first.json().id],
+        expectedReportVersion: 3,
         move: {
           itemId: first.json().id,
           projectId: secondProject.json().id,
@@ -465,13 +466,29 @@ describe('authenticated weekly report workflow', () => {
       categoryId: operationsId,
       version: 2
     });
+    expect(moved.json().reportVersion).toBe(4);
     const incompleteOrder = await app.inject({
       method: 'POST',
       url: `/api/reports/${reportId}/reorder`,
       headers: headers(),
-      payload: { type: 'completed', ids: [first.json().id] }
+      payload: { type: 'completed', ids: [first.json().id], expectedReportVersion: 4 }
     });
     expect(incompleteOrder.statusCode).toBe(400);
+    const staleOrder = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${reportId}/reorder`,
+      headers: headers(),
+      payload: {
+        type: 'completed',
+        ids: [second.json().id, first.json().id],
+        expectedReportVersion: 3
+      }
+    });
+    expect(staleOrder.statusCode).toBe(409);
+    expect(staleOrder.json()).toMatchObject({
+      error: 'REPORT_VERSION_CONFLICT',
+      currentVersion: 4
+    });
 
     const archived = await app.inject({
       method: 'PATCH',
