@@ -47,6 +47,7 @@ import { useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../api';
 import { ErrorState, Loading, Modal, TagField } from '../components';
 import { createDeferredAction } from '../deferred-action';
+import { createLatestTaskQueue } from '../latest-task-queue';
 import {
   addDays,
   formatDate,
@@ -80,6 +81,17 @@ type ProjectItemGroup = {
 };
 type ProjectDraft = { name: string; color: string };
 type ItemMeta = { progress: ReportItemProgress; note: string };
+type ItemDraft = {
+  contentMd: string;
+  progress: ReportItemProgress;
+  note: string;
+  projectId: string | null;
+  categoryId: string | null;
+  type: ReportItemType;
+  occurredOn: string | null;
+  tagIds: string[];
+};
+type ItemSaveTask = { revision: number; draft: ItemDraft };
 type CategoryAssignment = { itemId: string; expectedVersion: number };
 type CreateCategoryInput = { name: string; assignments?: CategoryAssignment[] };
 const progressLabels: Record<ReportItemProgress, string> = {
@@ -1424,12 +1436,37 @@ function ReportItemRow({
   const [status, setStatus] = useState<'saved' | 'saving' | 'error' | 'conflict'>('saved');
   const [conflictCurrent, setConflictCurrent] = useState<ReportItem | null>(null);
   const version = useRef(item.version);
+  const draftRevision = useRef(0);
+  const acknowledgedRevision = useRef(0);
+  const mounted = useRef(true);
   const initial = useRef(!initialMeta.legacy);
   const skipNextSave = useRef(false);
   const clickTimer = useRef<number | undefined>(undefined);
   const deferredSave = useRef(createDeferredAction()).current;
+  const saveTaskHandler = useRef<(task: ItemSaveTask) => Promise<void>>(async () => undefined);
+  const saveQueue = useRef(createLatestTaskQueue((task: ItemSaveTask) => saveTaskHandler.current(task))).current;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const latestDraft = useRef<ItemDraft>({
+    contentMd: content,
+    progress: itemMeta.progress,
+    note: itemMeta.note,
+    projectId: projectId || null,
+    categoryId: categoryId || null,
+    type: itemType,
+    occurredOn: occurredOn || null,
+    tagIds
+  });
+  latestDraft.current = {
+    contentMd: content,
+    progress: itemMeta.progress,
+    note: itemMeta.note,
+    projectId: projectId || null,
+    categoryId: categoryId || null,
+    type: itemType,
+    occurredOn: occurredOn || null,
+    tagIds
+  };
   const sortable = useSortable({
     id: item.id,
     data: {
@@ -1441,6 +1478,9 @@ function ReportItemRow({
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
 
   useEffect(() => {
+    if (draftRevision.current > acknowledgedRevision.current || saveQueue.isBusy() || deferredSave.hasPending()) {
+      return;
+    }
     setContent(item.contentMd);
     setItemMeta({ progress: item.progress, note: item.note });
     setProjectId(item.projectId ?? '');
@@ -1459,36 +1499,30 @@ function ReportItemRow({
     item.projectId,
     item.tags,
     item.type,
-    item.version
+    item.version,
+    deferredSave,
+    saveQueue
   ]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       window.clearTimeout(clickTimer.current);
       deferredSave.flush();
-    },
-    [deferredSave]
-  );
-  const save = useMutation({
-    mutationFn: () =>
-      api<ReportItem>(`/api/report-items/${item.id}`, {
+    };
+  }, [deferredSave]);
+  saveTaskHandler.current = async (task) => {
+    try {
+      const data = await api<ReportItem>(`/api/report-items/${item.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          contentMd: content,
-          progress: itemMeta.progress,
-          note: itemMeta.note,
-          projectId: projectId || null,
-          categoryId: categoryId || null,
-          type: itemType,
-          occurredOn: occurredOn || null,
-          tagIds,
-          expectedVersion: version.current
-        })
-      }),
-    onMutate: () => setStatus('saving'),
-    onSuccess: (data) => {
+        body: JSON.stringify({ ...task.draft, expectedVersion: version.current })
+      });
       version.current = data.version;
-      setConflictCurrent(null);
-      setStatus('saved');
+      acknowledgedRevision.current = Math.max(acknowledgedRevision.current, task.revision);
+      if (mounted.current) {
+        setConflictCurrent(null);
+        setStatus(draftRevision.current > task.revision ? 'saving' : 'saved');
+      }
       localStorage.removeItem(`weekly-notes:item-meta:${item.id}`);
       qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
         old
@@ -1496,14 +1530,22 @@ function ReportItemRow({
           : old
       );
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
-    },
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 409 && error.data?.current) {
-        setConflictCurrent(error.data.current as ReportItem);
-        setStatus('conflict');
-      } else setStatus('error');
+    } catch (error) {
+      deferredSave.cancel();
+      saveQueue.clearPending();
+      if (mounted.current) {
+        if (error instanceof ApiError && error.status === 409 && error.data?.current) {
+          setConflictCurrent(error.data.current as ReportItem);
+          setStatus('conflict');
+        } else setStatus('error');
+      }
+      throw error;
     }
-  });
+  };
+  const enqueueLatestDraft = () => {
+    if (mounted.current) setStatus('saving');
+    saveQueue.enqueue({ revision: draftRevision.current, draft: { ...latestDraft.current } });
+  };
   const tagKey = tagIds.join(',');
   // The mutation intentionally saves the latest controlled draft after a debounce.
   useEffect(() => {
@@ -1516,8 +1558,9 @@ function ReportItemRow({
       deferredSave.cancel();
       return;
     }
+    draftRevision.current += 1;
     setStatus('saving');
-    deferredSave.schedule(() => save.mutate(), 800);
+    deferredSave.schedule(enqueueLatestDraft, 800);
   }, [content, itemMeta.progress, itemMeta.note, projectId, categoryId, itemType, occurredOn, tagKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (status !== 'saving') return;
@@ -1697,8 +1740,11 @@ function ReportItemRow({
           <button
             onClick={() => {
               if (!conflictCurrent) return;
+              deferredSave.cancel();
+              saveQueue.clearPending();
               skipNextSave.current = true;
               version.current = conflictCurrent.version;
+              acknowledgedRevision.current = draftRevision.current;
               setContent(conflictCurrent.contentMd);
               setItemMeta({ progress: conflictCurrent.progress, note: conflictCurrent.note });
               setProjectId(conflictCurrent.projectId ?? '');
@@ -1726,7 +1772,7 @@ function ReportItemRow({
             onClick={() => {
               if (conflictCurrent) version.current = conflictCurrent.version;
               setConflictCurrent(null);
-              save.mutate();
+              enqueueLatestDraft();
             }}
           >
             重新应用本地修改
