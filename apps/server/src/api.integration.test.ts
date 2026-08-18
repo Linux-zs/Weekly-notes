@@ -433,6 +433,7 @@ describe('authenticated weekly report workflow', () => {
       note: '等待领导确认',
       version: 2
     });
+    expect(conflict.json().reportVersion).toBe(metadata.json().reportVersion);
     const boundary = 'zhoubao-image-boundary';
     const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
     const multipart = Buffer.concat([

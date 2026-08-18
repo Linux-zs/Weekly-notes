@@ -1496,6 +1496,9 @@ function ReportItemRow({
     restoredConflict ? 'conflict' : initialSnapshot ? 'saving' : 'saved'
   );
   const [conflictCurrent, setConflictCurrent] = useState<ReportItem | null>(restoredConflict ? item : null);
+  const [conflictReportVersion, setConflictReportVersion] = useState<number | null>(
+    restoredConflict ? report.version : null
+  );
   const version = useRef(item.version);
   const draftRevision = useRef(initialSnapshot?.revision ?? 0);
   const acknowledgedRevision = useRef(0);
@@ -1615,6 +1618,9 @@ function ReportItemRow({
       if (mounted.current) {
         if (error instanceof ApiError && error.status === 409 && error.data?.current) {
           setConflictCurrent(error.data.current as ReportItem);
+          setConflictReportVersion(
+            typeof error.data.reportVersion === 'number' ? error.data.reportVersion : null
+          );
           setStatus('conflict');
         } else setStatus('error');
       }
@@ -1852,12 +1858,14 @@ function ReportItemRow({
               setOccurredOn(conflictCurrent.occurredOn ?? '');
               setTagIds(conflictCurrent.tags.map((tag) => tag.id));
               setConflictCurrent(null);
+              setConflictReportVersion(null);
               setStatus('saved');
               removeItemDraft(item.id);
               qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
                 old
                   ? {
                       ...old,
+                      version: conflictReportVersion ?? old.version,
                       items: old.items.map((existing) =>
                         existing.id === conflictCurrent.id ? conflictCurrent : existing
                       )
@@ -1874,7 +1882,12 @@ function ReportItemRow({
                 version.current = conflictCurrent.version;
                 persistLatestDraft(conflictCurrent.version);
               }
+              if (conflictReportVersion !== null)
+                qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
+                  old ? { ...old, version: conflictReportVersion } : old
+                );
               setConflictCurrent(null);
+              setConflictReportVersion(null);
               enqueueLatestDraft();
             }}
           >

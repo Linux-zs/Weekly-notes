@@ -632,7 +632,15 @@ export async function registerApi(app: FastifyInstance) {
       .get(itemId, user.workspaceId, user.id) as ReportItemRow | undefined;
     if (!current) return reply.code(404).send({ error: 'NOT_FOUND' });
     if (current.version !== body.expectedVersion)
-      return reply.code(409).send({ error: 'VERSION_CONFLICT', current: serializeReportItem(current) });
+      return reply.code(409).send({
+        error: 'VERSION_CONFLICT',
+        current: serializeReportItem(current),
+        reportVersion: (
+          sqlite.prepare('SELECT version FROM weekly_reports WHERE id=?').get(current.report_id) as {
+            version: number;
+          }
+        ).version
+      });
     if (
       body.projectId !== undefined &&
       body.projectId !== current.project_id &&
