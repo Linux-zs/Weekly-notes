@@ -49,6 +49,12 @@ import { ErrorState, Loading, Modal, TagField } from '../components';
 import { createDeferredAction } from '../deferred-action';
 import { createLatestTaskQueue } from '../latest-task-queue';
 import {
+  readOrMigrateItemDraft,
+  removeItemDraft,
+  writeItemDraft,
+  type ItemDraftSnapshot
+} from '../item-draft-store';
+import {
   addDays,
   formatDate,
   hasMarkdownImage,
@@ -100,16 +106,17 @@ const progressLabels: Record<ReportItemProgress, string> = {
   incomplete: '推进中'
 };
 
-function readInitialItemMeta(item: ReportItem): { meta: ItemMeta; legacy: boolean } {
-  const fallback: ItemMeta = { progress: item.progress, note: item.note };
-  try {
-    const value = localStorage.getItem(`weekly-notes:item-meta:${item.id}`);
-    return value
-      ? { meta: { ...fallback, ...JSON.parse(value) }, legacy: true }
-      : { meta: fallback, legacy: false };
-  } catch {
-    return { meta: fallback, legacy: false };
-  }
+function itemDraft(item: ReportItem): ItemDraft {
+  return {
+    contentMd: item.contentMd,
+    progress: item.progress,
+    note: item.note,
+    projectId: item.projectId,
+    categoryId: item.categoryId,
+    type: item.type,
+    occurredOn: item.occurredOn,
+    tagIds: item.tags.map((tag) => tag.id)
+  };
 }
 
 export function ReportPage({ user }: { user: User }) {
@@ -1450,27 +1457,36 @@ function ReportItemRow({
   onImport: () => void;
 }) {
   const qc = useQueryClient();
-  const [initialMeta] = useState(() => readInitialItemMeta(item));
-  const [content, setContent] = useState(item.contentMd);
-  const [itemMeta, setItemMeta] = useState<ItemMeta>(initialMeta.meta);
-  const [projectId, setProjectId] = useState(item.projectId ?? '');
-  const [categoryId, setCategoryId] = useState(item.categoryId ?? '');
-  const [itemType, setItemType] = useState<ReportItemType>(item.type);
-  const [occurredOn, setOccurredOn] = useState(item.occurredOn ?? '');
-  const [tagIds, setTagIds] = useState(item.tags.map((tag) => tag.id));
+  const [initialSnapshot] = useState<ItemDraftSnapshot<ItemDraft> | null>(() =>
+    readOrMigrateItemDraft(item.id, item.version, itemDraft(item))
+  );
+  const restoredDraft = initialSnapshot?.draft ?? itemDraft(item);
+  const restoredConflict = Boolean(initialSnapshot && initialSnapshot.serverVersion !== item.version);
+  const [content, setContent] = useState(restoredDraft.contentMd);
+  const [itemMeta, setItemMeta] = useState<ItemMeta>({
+    progress: restoredDraft.progress,
+    note: restoredDraft.note
+  });
+  const [projectId, setProjectId] = useState(restoredDraft.projectId ?? '');
+  const [categoryId, setCategoryId] = useState(restoredDraft.categoryId ?? '');
+  const [itemType, setItemType] = useState<ReportItemType>(restoredDraft.type);
+  const [occurredOn, setOccurredOn] = useState(restoredDraft.occurredOn ?? '');
+  const [tagIds, setTagIds] = useState(restoredDraft.tagIds);
   const [inlineEditing, setInlineEditing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailEditing, setDetailEditing] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [categoryCreatorOpen, setCategoryCreatorOpen] = useState(false);
-  const [status, setStatus] = useState<'saved' | 'saving' | 'error' | 'conflict'>('saved');
-  const [conflictCurrent, setConflictCurrent] = useState<ReportItem | null>(null);
+  const [status, setStatus] = useState<'saved' | 'saving' | 'error' | 'conflict'>(
+    restoredConflict ? 'conflict' : initialSnapshot ? 'saving' : 'saved'
+  );
+  const [conflictCurrent, setConflictCurrent] = useState<ReportItem | null>(restoredConflict ? item : null);
   const version = useRef(item.version);
-  const draftRevision = useRef(0);
+  const draftRevision = useRef(initialSnapshot?.revision ?? 0);
   const acknowledgedRevision = useRef(0);
   const mounted = useRef(true);
-  const initial = useRef(!initialMeta.legacy);
+  const initial = useRef(!initialSnapshot || restoredConflict);
   const skipNextSave = useRef(false);
   const clickTimer = useRef<number | undefined>(undefined);
   const deferredSave = useRef(createDeferredAction()).current;
@@ -1500,6 +1516,12 @@ function ReportItemRow({
     occurredOn: occurredOn || null,
     tagIds
   };
+  const persistLatestDraft = (serverVersion = version.current) =>
+    writeItemDraft(item.id, {
+      serverVersion,
+      revision: draftRevision.current,
+      draft: { ...latestDraft.current, tagIds: [...latestDraft.current.tagIds] }
+    });
   const sortable = useSortable({
     id: item.id,
     data: {
@@ -1561,7 +1583,8 @@ function ReportItemRow({
         setConflictCurrent(null);
         setStatus(draftRevision.current > task.revision ? 'saving' : 'saved');
       }
-      localStorage.removeItem(`weekly-notes:item-meta:${item.id}`);
+      if (draftRevision.current <= task.revision) removeItemDraft(item.id);
+      else persistLatestDraft(savedItem.version);
       qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
         old
           ? {
@@ -1574,7 +1597,7 @@ function ReportItemRow({
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
     } catch (error) {
       deferredSave.cancel();
-      saveQueue.clearPending();
+      persistLatestDraft();
       if (mounted.current) {
         if (error instanceof ApiError && error.status === 409 && error.data?.current) {
           setConflictCurrent(error.data.current as ReportItem);
@@ -1586,7 +1609,10 @@ function ReportItemRow({
   };
   const enqueueLatestDraft = () => {
     if (mounted.current) setStatus('saving');
-    saveQueue.enqueue({ revision: draftRevision.current, draft: { ...latestDraft.current } });
+    saveQueue.enqueue({
+      revision: draftRevision.current,
+      draft: { ...latestDraft.current, tagIds: [...latestDraft.current.tagIds] }
+    });
   };
   const tagKey = tagIds.join(',');
   // The mutation intentionally saves the latest controlled draft after a debounce.
@@ -1601,11 +1627,12 @@ function ReportItemRow({
       return;
     }
     draftRevision.current += 1;
+    persistLatestDraft();
     setStatus('saving');
     deferredSave.schedule(enqueueLatestDraft, 800);
   }, [content, itemMeta.progress, itemMeta.note, projectId, categoryId, itemType, occurredOn, tagKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (status !== 'saving') return;
+    if (status === 'saved') return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
@@ -1655,7 +1682,7 @@ function ReportItemRow({
   const remove = useMutation({
     mutationFn: () => api(`/api/report-items/${item.id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      localStorage.removeItem(`weekly-notes:item-meta:${item.id}`);
+      removeItemDraft(item.id);
       qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
         old
           ? {
@@ -1677,6 +1704,11 @@ function ReportItemRow({
     setInlineEditing(false);
     setDetailEditing(false);
     setDetailsOpen(true);
+  };
+  const retrySave = () => {
+    deferredSave.cancel();
+    persistLatestDraft();
+    enqueueLatestDraft();
   };
   const displayContent = summarizeMarkdown(content) || (content.trim() ? '点击打开详情' : '点击填写内容');
 
@@ -1762,6 +1794,11 @@ function ReportItemRow({
           {(status === 'error' || status === 'conflict') && (
             <span className={`save-status ${status}`}>{status === 'conflict' ? '冲突' : '保存失败'}</span>
           )}
+          {status === 'error' && (
+            <button className="icon-button" onClick={retrySave} aria-label="重试保存" title="重试保存">
+              <RefreshCcw size={14} />
+            </button>
+          )}
           <button
             className="icon-button import-item"
             onClick={onImport}
@@ -1802,6 +1839,7 @@ function ReportItemRow({
               setTagIds(conflictCurrent.tags.map((tag) => tag.id));
               setConflictCurrent(null);
               setStatus('saved');
+              removeItemDraft(item.id);
               qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
                 old
                   ? {
@@ -1818,7 +1856,10 @@ function ReportItemRow({
           </button>
           <button
             onClick={() => {
-              if (conflictCurrent) version.current = conflictCurrent.version;
+              if (conflictCurrent) {
+                version.current = conflictCurrent.version;
+                persistLatestDraft(conflictCurrent.version);
+              }
               setConflictCurrent(null);
               enqueueLatestDraft();
             }}
@@ -1846,15 +1887,23 @@ function ReportItemRow({
       >
         <div className="report-detail-editor markdown-only-editor">
           <div className="detail-editor-status">
-            <span className={`save-status ${status}`}>
-              {status === 'saving'
-                ? '保存中'
-                : status === 'saved'
-                  ? '已保存'
-                  : status === 'conflict'
-                    ? '内容有冲突'
-                    : '保存失败'}
-            </span>
+            <div className="detail-save-state">
+              <span className={`save-status ${status}`}>
+                {status === 'saving'
+                  ? '保存中'
+                  : status === 'saved'
+                    ? '已保存'
+                    : status === 'conflict'
+                      ? '内容有冲突'
+                      : '保存失败'}
+              </span>
+              {status === 'error' && (
+                <button className="button secondary compact-button" onClick={retrySave}>
+                  <RefreshCcw size={14} />
+                  重试保存
+                </button>
+              )}
+            </div>
             <div className="detail-edit-actions">
               {detailEditing && (
                 <div className="detail-tools">
