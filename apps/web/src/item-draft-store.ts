@@ -17,6 +17,14 @@ function browserStorage(): DraftStorage | undefined {
   }
 }
 
+function discardStorageKey(storage: DraftStorage, key: string) {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Storage can be disabled; callers still fall back to in-memory state.
+  }
+}
+
 export function readItemDraft<T>(itemId: string, storage = browserStorage()) {
   if (!storage) return null;
   try {
@@ -28,10 +36,13 @@ export function readItemDraft<T>(itemId: string, storage = browserStorage()) {
       !Number.isInteger(parsed.revision) ||
       !parsed.draft ||
       typeof parsed.draft !== 'object'
-    )
+    ) {
+      discardStorageKey(storage, draftKey(itemId));
       return null;
+    }
     return parsed as ItemDraftSnapshot<T>;
   } catch {
+    discardStorageKey(storage, draftKey(itemId));
     return null;
   }
 }
@@ -52,11 +63,7 @@ export function writeItemDraft<T>(
 
 export function removeItemDraft(itemId: string, storage = browserStorage()) {
   if (!storage) return;
-  try {
-    storage.removeItem(draftKey(itemId));
-  } catch {
-    // Storage can be disabled or full; saving still continues in memory.
-  }
+  discardStorageKey(storage, draftKey(itemId));
 }
 
 export function readOrMigrateItemDraft<T extends { progress: string; note: string }>(
@@ -80,9 +87,10 @@ export function readOrMigrateItemDraft<T extends { progress: string; note: strin
         note: typeof legacy.note === 'string' ? legacy.note : serverDraft.note
       }
     };
-    if (writeItemDraft(itemId, snapshot, storage)) storage.removeItem(legacyKey(itemId));
+    if (writeItemDraft(itemId, snapshot, storage)) discardStorageKey(storage, legacyKey(itemId));
     return snapshot;
   } catch {
+    discardStorageKey(storage, legacyKey(itemId));
     return null;
   }
 }

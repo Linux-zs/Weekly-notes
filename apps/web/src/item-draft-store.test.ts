@@ -46,6 +46,22 @@ describe('item draft storage', () => {
     const storage = memoryStorage();
     storage.setItem('weekly-report:item-draft:v1:item', '{broken');
     expect(readItemDraft('item', storage)).toBeNull();
+    expect(storage.getItem('weekly-report:item-draft:v1:item')).toBeNull();
     expect(writeItemDraft('item', { serverVersion: 1, revision: 1, draft: {} }, undefined)).toBe(false);
+  });
+
+  it('discards malformed legacy metadata after the one-time migration attempt', () => {
+    const storage = memoryStorage();
+    storage.setItem('weekly-notes:item-meta:item', '{broken');
+
+    expect(
+      readOrMigrateItemDraft(
+        'item',
+        1,
+        { contentMd: '正文', progress: 'incomplete', note: '', tagIds: [] },
+        storage
+      )
+    ).toBeNull();
+    expect(storage.getItem('weekly-notes:item-meta:item')).toBeNull();
   });
 });
