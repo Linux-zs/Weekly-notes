@@ -112,6 +112,21 @@ const progressLabels: Record<ReportItemProgress, string> = {
   answered: '已解答',
   incomplete: '推进中'
 };
+const supportedImageMimeTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+type ClipboardImageSource = {
+  items?: ArrayLike<Pick<DataTransferItem, 'getAsFile' | 'kind' | 'type'>>;
+  files?: ArrayLike<File>;
+};
+
+export function clipboardImage(source: ClipboardImageSource): File | null {
+  for (const item of Array.from(source.items ?? [])) {
+    if (item.kind !== 'file' || !supportedImageMimeTypes.has(item.type)) continue;
+    const file = item.getAsFile();
+    if (file) return file;
+  }
+  return Array.from(source.files ?? []).find((file) => supportedImageMimeTypes.has(file.type)) ?? null;
+}
 
 function itemDraft(item: ReportItem): ItemDraft {
   return {
@@ -1975,6 +1990,7 @@ function ReportItemRow({
                     添加图片
                   </button>
                   <span>PNG / JPEG / GIF / WebP，最大 8 MB</span>
+                  <span className="paste-image-hint">也可在正文中直接粘贴截图</span>
                   {upload.error && <strong>{upload.error.message}</strong>}
                 </div>
               )}
@@ -2059,6 +2075,12 @@ function ReportItemRow({
                 autoFocus
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
+                onPaste={(event) => {
+                  const file = clipboardImage(event.clipboardData);
+                  if (!file) return;
+                  event.preventDefault();
+                  upload.mutate({ file, insertAt: event.currentTarget.selectionStart });
+                }}
                 rows={16}
                 placeholder="写下一件值得回看的事……"
                 aria-label="Markdown 内容"

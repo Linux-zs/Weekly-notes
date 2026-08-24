@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Project, ReportCategory, ReportItem, WeeklyReport } from '@zhoubao/shared';
 import {
   buildReportText,
+  clipboardImage,
   groupItemsByProjectAndCategory,
   lastActiveCategoryId,
   previousReportWeek,
@@ -35,6 +36,16 @@ function item(id: string, categoryId: string | null, contentMd = id): ReportItem
 }
 
 describe('weekly report category presentation', () => {
+  it('selects supported clipboard images without intercepting ordinary clipboard data', () => {
+    const png = { name: 'screenshot.png', type: 'image/png' } as File;
+    const textItem = { kind: 'string', type: 'text/plain', getAsFile: () => null };
+    const imageItem = { kind: 'file', type: 'image/png', getAsFile: () => png };
+
+    expect(clipboardImage({ items: [textItem] })).toBeNull();
+    expect(clipboardImage({ items: [textItem, imageItem] })).toBe(png);
+    expect(clipboardImage({ files: [{ name: 'photo.bmp', type: 'image/bmp' } as File] })).toBeNull();
+  });
+
   it('merges all items of the same category and keeps uncategorized items last', () => {
     const groups = groupItemsByProjectAndCategory(
       [
