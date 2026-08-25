@@ -166,8 +166,16 @@ export function reportWithLatestDrafts(
     items: report.items.map((item) => {
       const draft = liveDrafts.get(item.id) ?? storedDraft(item.id);
       if (!draft) return item;
-      const { tagIds: _tagIds, ...changes } = draft;
-      return { ...item, ...changes };
+      return {
+        ...item,
+        contentMd: draft.contentMd,
+        progress: draft.progress,
+        note: draft.note,
+        projectId: draft.projectId,
+        categoryId: draft.categoryId,
+        type: draft.type,
+        occurredOn: draft.occurredOn
+      };
     })
   };
 }
