@@ -150,6 +150,22 @@ describe('authenticated weekly report workflow', () => {
     expect(response.json().issues).toEqual(expect.any(Array));
   });
 
+  it('returns validation errors for ISO weeks that do not exist in the requested year', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/reports/2021/53',
+      headers: headers()
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: 'VALIDATION_ERROR', message: '请求参数不正确' });
+    expect(response.json().issues).toContainEqual({
+      path: ['week'],
+      code: 'custom',
+      message: '该年份不存在此 ISO 周次'
+    });
+  });
+
   it('returns the saved timezone in the current user contract', async () => {
     const updated = await app.inject({
       method: 'PATCH',

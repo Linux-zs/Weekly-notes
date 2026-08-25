@@ -19,10 +19,18 @@ import { config } from '../config.js';
 import { removeStoredFile, withStorageLock } from '../services/storage.js';
 
 const uuidParam = z.object({ id: z.string().uuid() });
-const weekParams = z.object({
-  year: z.coerce.number().int().min(2000).max(2200),
-  week: z.coerce.number().int().min(1).max(53)
-});
+const weekParams = z
+  .object({
+    year: z.coerce.number().int().min(2000).max(2200),
+    week: z.coerce.number().int().min(1).max(53)
+  })
+  .superRefine((value, context) => {
+    try {
+      isoWeekRange(value.year, value.week);
+    } catch {
+      context.addIssue({ code: 'custom', path: ['week'], message: '该年份不存在此 ISO 周次' });
+    }
+  });
 const expectedVersion = z.object({ expectedVersion: z.number().int().positive() });
 const categoryWithItemInput = reportCategoryInputSchema.extend({
   projectId: z.string().uuid().nullable(),
