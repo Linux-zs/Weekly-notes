@@ -298,8 +298,15 @@ function SettingsContent({
           登录平台没有返回可信的已验证邮箱，因此暂未加入受邀空间。可以绑定另一个已验证相同邮箱的登录方式后重试。
         </div>
       )}
+      <nav className="settings-section-nav" aria-label="设置页分区">
+        <a href="#settings-profile">个人与空间</a>
+        <a href="#projects">项目与团队</a>
+        <a href="#settings-accounts">身份与数据</a>
+        <a href="#settings-categories">分类与标签</a>
+        <a href="#settings-interface">界面</a>
+      </nav>
       <div className="settings-dashboard">
-        <section className="settings-card vertical settings-profile">
+        <section id="settings-profile" className="settings-card vertical settings-profile">
           <div className="panel-heading">
             <div>
               <h2>
@@ -379,7 +386,7 @@ function SettingsContent({
             </button>
           </form>
         </section>
-        <section className="settings-card vertical settings-space">
+        <section id="settings-space" className="settings-card vertical settings-space">
           <div className="panel-heading">
             <div>
               <h2>
@@ -417,7 +424,7 @@ function SettingsContent({
           </form>
         </section>
         <ProjectSettings />
-        <section className="settings-card vertical settings-team">
+        <section id="settings-team" className="settings-card vertical settings-team">
           <div className="panel-heading">
             <div>
               <h2>
@@ -502,7 +509,7 @@ function SettingsContent({
           )}
           {revokeInvitation.error && <div className="form-error">{revokeInvitation.error.message}</div>}
         </section>
-        <section className="settings-card vertical settings-accounts">
+        <section id="settings-accounts" className="settings-card vertical settings-accounts">
           <div className="panel-heading">
             <div>
               <h2>登录方式</h2>
@@ -571,7 +578,7 @@ function SettingsContent({
               ))}
           </div>
         </section>
-        <section className="settings-card vertical settings-data">
+        <section id="settings-data" className="settings-card vertical settings-data">
           <div className="panel-heading">
             <div>
               <h2>
@@ -586,7 +593,7 @@ function SettingsContent({
             </a>
           </div>
         </section>
-        <section className="settings-card vertical settings-categories">
+        <section id="settings-categories" className="settings-card vertical settings-categories">
           <div className="panel-heading">
             <div>
               <h2>
@@ -664,7 +671,7 @@ function SettingsContent({
             </div>
           )}
         </section>
-        <section className="settings-card vertical settings-tags">
+        <section id="settings-tags" className="settings-card vertical settings-tags">
           <div className="panel-heading">
             <div>
               <h2>
@@ -708,7 +715,7 @@ function SettingsContent({
             )}
           </div>
         </section>
-        <section className="settings-card settings-preference">
+        <section id="settings-interface" className="settings-card settings-preference">
           <div className="settings-icon">
             <Palette />
           </div>

@@ -5,9 +5,11 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { api } from './api';
 import { LoginPage } from './App';
 import { TagField } from './components';
+import { SearchPage } from './pages/SearchPage';
 
 vi.mock('./api', () => ({
   api: vi.fn()
@@ -17,6 +19,26 @@ const mockedApi = vi.mocked(api);
 
 function queryWrapper(client: QueryClient, children: ReactNode) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+function renderSearchPage(tags: Array<{ id: string; name: string; color: string }>) {
+  mockedApi.mockImplementation((path: string) => {
+    if (path === '/api/projects') return Promise.resolve({ projects: [] }) as never;
+    if (path === '/api/tags') return Promise.resolve({ tags }) as never;
+    if (path.startsWith('/api/search?')) {
+      return Promise.resolve({ items: [], page: 1, hasMore: false }) as never;
+    }
+    throw new Error(`Unexpected API path: ${path}`);
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    queryWrapper(
+      client,
+      <MemoryRouter>
+        <SearchPage />
+      </MemoryRouter>
+    )
+  );
 }
 
 afterEach(() => {
@@ -87,5 +109,21 @@ describe('interactive limits and login availability', () => {
 
     expect(await screen.findByText('尚未配置可用的登录平台，请联系管理员完成身份平台配置。')).toBeTruthy();
     expect(screen.queryByRole('link', { name: '进入本地开发环境' })).toBeNull();
+  });
+
+  it('hides the tag filter row when the workspace has no tags', async () => {
+    renderSearchPage([]);
+
+    expect(await screen.findByPlaceholderText('搜索周报内容……')).toBeTruthy();
+    expect(screen.queryByText('标签', { selector: '.search-tag-row > span' })).toBeNull();
+  });
+
+  it('shows selectable tag filters when the workspace has tags', async () => {
+    renderSearchPage([{ id: 'tag-1', name: '客户沟通', color: '#CF4F1C' }]);
+
+    const tag = await screen.findByRole('button', { name: '客户沟通' });
+    expect(screen.getByText('标签', { selector: '.search-tag-row > span' })).toBeTruthy();
+    await userEvent.click(tag);
+    expect(tag.classList.contains('selected')).toBe(true);
   });
 });

@@ -26,7 +26,6 @@ import type {
   WeeklyReport
 } from '@zhoubao/shared';
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   CalendarDays,
@@ -37,6 +36,7 @@ import {
   GripVertical,
   Image as ImageIcon,
   ImagePlus,
+  Info,
   Pencil,
   Plus,
   RefreshCcw,
@@ -290,8 +290,8 @@ export function ReportPage({ user }: { user: User }) {
         />
       </header>
       {!data.holidayDataAvailable && (
-        <div className="notice">
-          <AlertTriangle size={17} />
+        <div className="holiday-data-notice" role="status">
+          <Info size={16} />
           <span>{year} 年节假日数据尚未导入，当前仅按普通周末显示。</span>
         </div>
       )}

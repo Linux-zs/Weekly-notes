@@ -176,38 +176,40 @@ export function SearchPage() {
           </button>
         </div>
         {dateInvalid && <div className="form-error">开始日期不能晚于结束日期。</div>}
-        <div className="search-tag-row">
-          <span>标签</span>
-          <div>
-            {tags.data!.tags.map((tag) => (
-              <button
-                type="button"
-                key={tag.id}
-                className={`tag-choice${filters.tagIds.includes(tag.id) ? ' selected' : ''}`}
-                onClick={() =>
-                  setFilters({
-                    ...filters,
-                    tagIds: filters.tagIds.includes(tag.id)
-                      ? filters.tagIds.filter((id) => id !== tag.id)
-                      : [...filters.tagIds, tag.id]
-                  })
-                }
+        {tags.data!.tags.length > 0 && (
+          <div className="search-tag-row">
+            <span>标签</span>
+            <div>
+              {tags.data!.tags.map((tag) => (
+                <button
+                  type="button"
+                  key={tag.id}
+                  className={`tag-choice${filters.tagIds.includes(tag.id) ? ' selected' : ''}`}
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      tagIds: filters.tagIds.includes(tag.id)
+                        ? filters.tagIds.filter((id) => id !== tag.id)
+                        : [...filters.tagIds, tag.id]
+                    })
+                  }
+                >
+                  <i style={{ background: tag.color }} />
+                  {tag.name}
+                </button>
+              ))}
+            </div>
+            {filters.tagIds.length > 1 && (
+              <select
+                value={filters.tagMode}
+                onChange={(event) => setFilters({ ...filters, tagMode: event.target.value as 'all' | 'any' })}
               >
-                <i style={{ background: tag.color }} />
-                {tag.name}
-              </button>
-            ))}
+                <option value="all">同时包含</option>
+                <option value="any">包含任一</option>
+              </select>
+            )}
           </div>
-          {filters.tagIds.length > 1 && (
-            <select
-              value={filters.tagMode}
-              onChange={(event) => setFilters({ ...filters, tagMode: event.target.value as 'all' | 'any' })}
-            >
-              <option value="all">同时包含</option>
-              <option value="any">包含任一</option>
-            </select>
-          )}
-        </div>
+        )}
       </form>
       {results.isLoading ? (
         <Loading />
