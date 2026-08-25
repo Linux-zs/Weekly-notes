@@ -249,7 +249,7 @@ export function SearchPage() {
                 </p>
                 <Link
                   className="result-open"
-                  to={`/week/${result.weekYear}/${result.weekNumber}`}
+                  to={`/week/${result.weekYear}/${result.weekNumber}?item=${encodeURIComponent(result.id)}`}
                   aria-label={`打开 ${result.weekYear} 年第 ${result.weekNumber} 周`}
                 >
                   <span>打开</span>

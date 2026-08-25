@@ -43,7 +43,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, ApiError } from '../api';
 import { ErrorState, Loading, Modal, TagField } from '../components';
 import { createDeferredAction } from '../deferred-action';
@@ -174,13 +174,17 @@ export function reportWithLatestDrafts(
 
 export function ReportPage({ user }: { user: User }) {
   const params = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedItemId = searchParams.get('item');
   const current = isoWeekForDate(todayInTimezone(user.timezone));
   const year = Number(params.year) || current.year;
   const week = Number(params.week) || current.week;
   const [activeSection, setActiveSection] = useState(0);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
+  const [detailLinkError, setDetailLinkError] = useState('');
   const [openDetails, setOpenDetails] = useState<OpenItemDetails | null>(null);
+  const handledDetailLink = useRef<string | null>(null);
   const liveDraftReaders = useRef(new Map<string, LiveDraftReader>());
   const registerLiveDraft = useCallback((itemId: string, reader: LiveDraftReader | null) => {
     if (reader) liveDraftReaders.current.set(itemId, reader);
@@ -207,7 +211,40 @@ export function ReportPage({ user }: { user: User }) {
   useEffect(() => {
     setActiveSection(0);
     setOpenDetails(null);
+    setDetailLinkError('');
+    handledDetailLink.current = null;
   }, [year, week]);
+  useEffect(() => {
+    if (!requestedItemId) {
+      handledDetailLink.current = null;
+      return;
+    }
+    if (!report.data || handledDetailLink.current === requestedItemId) return;
+    handledDetailLink.current = requestedItemId;
+    const requestedItem = report.data.items.find((item) => item.id === requestedItemId);
+    if (!requestedItem) {
+      setDetailLinkError('未找到要打开的周报条目，可能已被删除或不属于当前周。');
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.delete('item');
+          return next;
+        },
+        { replace: true }
+      );
+      return;
+    }
+    setDetailLinkError('');
+    setActiveSection(requestedItem.type === 'next_plan' ? 1 : 0);
+    setOpenDetails({
+      itemId: requestedItem.id,
+      placement: {
+        projectId: requestedItem.projectId,
+        categoryId: requestedItem.categoryId,
+        type: requestedItem.type
+      }
+    });
+  }, [report.data, requestedItemId, setSearchParams]);
   const addMutation = useMutation({
     mutationFn: async ({
       type,
@@ -281,13 +318,36 @@ export function ReportPage({ user }: { user: User }) {
   const data = report.data!;
   const displayItems = applyOpenItemPlacement(data.items, openDetails);
   const activeType = sections[activeSection];
-  const openItemDetails = (item: ReportItem) =>
+  const openItemDetails = (item: ReportItem) => {
+    handledDetailLink.current = item.id;
     setOpenDetails({
       itemId: item.id,
       placement: { projectId: item.projectId, categoryId: item.categoryId, type: item.type }
     });
-  const changeSection = (next: number) => {
+    setDetailLinkError('');
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set('item', item.id);
+        return next;
+      },
+      { replace: true }
+    );
+  };
+  const closeItemDetails = () => {
     setOpenDetails(null);
+    handledDetailLink.current = null;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete('item');
+        return next;
+      },
+      { replace: true }
+    );
+  };
+  const changeSection = (next: number) => {
+    closeItemDetails();
     setActiveSection(next);
   };
   const move = (delta: number) => {
@@ -367,6 +427,7 @@ export function ReportPage({ user }: { user: User }) {
         <div className="page-action-error">新增项目失败：{createProject.error.message}</div>
       )}
       {copyError && <div className="page-action-error">{copyError}</div>}
+      {detailLinkError && <div className="page-action-error">{detailLinkError}</div>}
       <DraftRegistryContext.Provider value={registerLiveDraft}>
         <div className="report-sections report-sections-focused">
           <ReportSection
@@ -390,7 +451,7 @@ export function ReportPage({ user }: { user: User }) {
             copied={copied}
             openDetailItemId={openDetails?.itemId ?? null}
             onOpenDetails={openItemDetails}
-            onCloseDetails={() => setOpenDetails(null)}
+            onCloseDetails={closeItemDetails}
           />
           {activeType === 'completed' && (
             <ReportSection
@@ -412,7 +473,7 @@ export function ReportPage({ user }: { user: User }) {
               copied={false}
               openDetailItemId={openDetails?.itemId ?? null}
               onOpenDetails={openItemDetails}
-              onCloseDetails={() => setOpenDetails(null)}
+              onCloseDetails={closeItemDetails}
               supplementary
             />
           )}

@@ -22,12 +22,15 @@ function queryWrapper(client: QueryClient, children: ReactNode) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-function renderSearchPage(tags: Array<{ id: string; name: string; color: string }>) {
+function renderSearchPage(
+  tags: Array<{ id: string; name: string; color: string }>,
+  items: Array<Record<string, unknown>> = []
+) {
   mockedApi.mockImplementation((path: string) => {
     if (path === '/api/projects') return Promise.resolve({ projects: [] }) as never;
     if (path === '/api/tags') return Promise.resolve({ tags }) as never;
     if (path.startsWith('/api/search?')) {
-      return Promise.resolve({ items: [], page: 1, hasMore: false }) as never;
+      return Promise.resolve({ items, page: 1, hasMore: false }) as never;
     }
     throw new Error(`Unexpected API path: ${path}`);
   });
@@ -80,7 +83,7 @@ describe('interactive limits and login availability', () => {
     render(
       queryWrapper(
         client,
-        <MemoryRouter initialEntries={['/week/2026/34']}>
+        <MemoryRouter initialEntries={['/week/2026/34?item=missing-item']}>
           <Routes>
             <Route
               path="/week/:year/:week"
@@ -102,6 +105,7 @@ describe('interactive limits and login availability', () => {
     );
 
     const openImport = await screen.findByRole('button', { name: '引入上周任务' });
+    expect(screen.getByText('未找到要打开的周报条目，可能已被删除或不属于当前周。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '添加一条本周完成' })).toBeTruthy();
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -161,7 +165,7 @@ describe('interactive limits and login availability', () => {
     render(
       queryWrapper(
         client,
-        <MemoryRouter initialEntries={['/week/2026/34']}>
+        <MemoryRouter initialEntries={['/week/2026/34?item=item-1']}>
           <Routes>
             <Route
               path="/week/:year/:week"
@@ -182,13 +186,15 @@ describe('interactive limits and login availability', () => {
       )
     );
 
-    await userEvent.click(await screen.findByRole('button', { name: '完成接口改造' }));
-    expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
     expect(screen.getByText('客户端', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('开发', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('08/18', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('重点')).toBeTruthy();
     expect(screen.getByText('等待发布窗口')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await userEvent.click(screen.getByRole('button', { name: '完成接口改造' }));
+    expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '关闭' }));
     await userEvent.click(screen.getByRole('button', { name: '编辑第 1 条内容' }));
     expect(screen.getByRole('textbox', { name: '本周完成第 1 条内容' })).toBeTruthy();
@@ -283,5 +289,29 @@ describe('interactive limits and login availability', () => {
     expect(screen.getByText('标签', { selector: '.search-tag-row > span' })).toBeTruthy();
     await userEvent.click(tag);
     expect(tag.classList.contains('selected')).toBe(true);
+  });
+
+  it('links search results directly to their report item details', async () => {
+    renderSearchPage(
+      [],
+      [
+        {
+          id: 'item-42',
+          contentMd: '直接定位的条目',
+          type: 'completed',
+          projectId: null,
+          occurredOn: null,
+          weekYear: 2026,
+          weekNumber: 34,
+          weekStart: '2026-08-17',
+          projectName: null,
+          projectColor: null,
+          tags: []
+        }
+      ]
+    );
+
+    const link = await screen.findByRole('link', { name: '打开 2026 年第 34 周' });
+    expect(link.getAttribute('href')).toBe('/week/2026/34?item=item-42');
   });
 });
