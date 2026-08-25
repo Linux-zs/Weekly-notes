@@ -131,12 +131,12 @@ describe('interactive limits and login availability', () => {
           categoryId: 'category-1',
           type: 'completed' as const,
           contentMd: '完成接口改造',
-          occurredOn: null,
+          occurredOn: '2026-08-18',
           progress: 'completed' as const,
-          note: '',
+          note: '等待发布窗口',
           position: 0,
           version: 1,
-          tags: []
+          tags: [{ id: 'tag-1', name: '重点', color: '#CF4F1C' }]
         }
       ],
       calendarDays: [],
@@ -184,6 +184,11 @@ describe('interactive limits and login availability', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: '完成接口改造' }));
     expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
+    expect(screen.getByText('客户端', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('开发', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('08/18', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('重点')).toBeTruthy();
+    expect(screen.getByText('等待发布窗口')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '关闭' }));
     await userEvent.click(screen.getByRole('button', { name: '编辑第 1 条内容' }));
     expect(screen.getByRole('textbox', { name: '本周完成第 1 条内容' })).toBeTruthy();

@@ -1886,6 +1886,10 @@ function ReportItemRow({
     enqueueLatestDraft();
   };
   const displayContent = summarizeMarkdown(content) || (content.trim() ? '点击打开详情' : '点击填写内容');
+  const detailProject = projects.find((project) => project.id === (projectId || null));
+  const detailCategory = categories.find((category) => category.id === (categoryId || null));
+  const knownTags = qc.getQueryData<{ tags: ReportItem['tags'] }>(['tags'])?.tags ?? item.tags;
+  const detailTags = knownTags.filter((tag) => tagIds.includes(tag.id));
 
   return (
     <article
@@ -2209,12 +2213,53 @@ function ReportItemRow({
             </div>
           ) : (
             <>
-              {occurredOn && (
-                <div className="detail-read-meta">
-                  <CalendarDays size={14} />
-                  发生日期：{formatDate(occurredOn)}
+              <dl className="detail-read-fields">
+                <div>
+                  <dt>栏目</dt>
+                  <dd>{sectionLabels[itemType]}</dd>
                 </div>
-              )}
+                <div>
+                  <dt>项目</dt>
+                  <dd>
+                    {detailProject?.name ?? '未归属项目'}
+                    {detailProject?.archivedAt ? '（已停用）' : ''}
+                  </dd>
+                </div>
+                <div>
+                  <dt>分类</dt>
+                  <dd>
+                    {detailCategory?.name ?? '未分类'}
+                    {detailCategory?.archivedAt ? '（已停用）' : ''}
+                  </dd>
+                </div>
+                <div>
+                  <dt>进度</dt>
+                  <dd className={`detail-progress progress-${itemMeta.progress}`}>
+                    {progressLabels[itemMeta.progress]}
+                  </dd>
+                </div>
+                <div>
+                  <dt>发生日期</dt>
+                  <dd>{occurredOn ? formatDate(occurredOn) : '未填写'}</dd>
+                </div>
+                <div className="detail-read-tags">
+                  <dt>标签</dt>
+                  <dd>
+                    {detailTags.length
+                      ? detailTags.map((tag) => (
+                          <span className="detail-read-tag" key={tag.id}>
+                            <i style={{ background: tag.color }} />
+                            {tag.name}
+                          </span>
+                        ))
+                      : '无'}
+                  </dd>
+                </div>
+                <div className="detail-read-note">
+                  <dt>备注</dt>
+                  <dd>{itemMeta.note || '无'}</dd>
+                </div>
+              </dl>
               <div
                 className="detail-preview detail-preview-only"
                 onDoubleClick={(event) => {
