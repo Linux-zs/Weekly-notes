@@ -107,6 +107,10 @@ type ItemDraft = {
 type ItemSaveTask = { revision: number; draft: ItemDraft };
 type CategoryAssignment = { itemId: string; expectedVersion: number };
 type CreateCategoryInput = { name: string; assignments?: CategoryAssignment[] };
+type OpenItemDetails = {
+  itemId: string;
+  placement: Pick<ReportItem, 'projectId' | 'categoryId' | 'type'>;
+};
 const progressLabels: Record<ReportItemProgress, string> = {
   completed: '已完成',
   answered: '已解答',
@@ -141,6 +145,11 @@ function itemDraft(item: ReportItem): ItemDraft {
   };
 }
 
+export function applyOpenItemPlacement(items: ReportItem[], openDetails: OpenItemDetails | null) {
+  if (!openDetails) return items;
+  return items.map((item) => (item.id === openDetails.itemId ? { ...item, ...openDetails.placement } : item));
+}
+
 export function ReportPage({ user }: { user: User }) {
   const params = useParams();
   const current = isoWeekForDate(todayInTimezone(user.timezone));
@@ -148,6 +157,7 @@ export function ReportPage({ user }: { user: User }) {
   const week = Number(params.week) || current.week;
   const [activeSection, setActiveSection] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [openDetails, setOpenDetails] = useState<OpenItemDetails | null>(null);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const report = useQuery({
@@ -166,7 +176,10 @@ export function ReportPage({ user }: { user: User }) {
     queryKey: ['categories'],
     queryFn: () => api<{ categories: ReportCategory[] }>('/api/categories')
   });
-  useEffect(() => setActiveSection(0), [year, week]);
+  useEffect(() => {
+    setActiveSection(0);
+    setOpenDetails(null);
+  }, [year, week]);
   const addMutation = useMutation({
     mutationFn: async ({
       type,
@@ -238,7 +251,17 @@ export function ReportPage({ user }: { user: User }) {
     );
 
   const data = report.data!;
+  const displayItems = applyOpenItemPlacement(data.items, openDetails);
   const activeType = sections[activeSection];
+  const openItemDetails = (item: ReportItem) =>
+    setOpenDetails({
+      itemId: item.id,
+      placement: { projectId: item.projectId, categoryId: item.categoryId, type: item.type }
+    });
+  const changeSection = (next: number) => {
+    setOpenDetails(null);
+    setActiveSection(next);
+  };
   const move = (delta: number) => {
     const next = isoWeekForDate(addDays(data.weekStart, delta * 7));
     navigate(
@@ -306,7 +329,7 @@ export function ReportPage({ user }: { user: User }) {
           key={activeType}
           index={activeSection}
           type={activeType}
-          items={data.items.filter((item) => item.type === activeType)}
+          items={displayItems.filter((item) => item.type === activeType)}
           report={data}
           projects={projects.data!.projects}
           categories={categories.data!.categories}
@@ -315,17 +338,20 @@ export function ReportPage({ user }: { user: User }) {
           onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
           onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
           creatingProject={createProject.isPending}
-          onPrevious={() => setActiveSection((index) => Math.max(0, index - 1))}
-          onNext={() => setActiveSection((index) => Math.min(sections.length - 1, index + 1))}
+          onPrevious={() => changeSection(Math.max(0, activeSection - 1))}
+          onNext={() => changeSection(Math.min(sections.length - 1, activeSection + 1))}
           canPrevious={activeSection > 0}
           canNext={activeSection < sections.length - 1}
           onCopy={activeType === 'completed' ? copyReport : undefined}
           copied={copied}
+          openDetailItemId={openDetails?.itemId ?? null}
+          onOpenDetails={openItemDetails}
+          onCloseDetails={() => setOpenDetails(null)}
         />
         {activeType === 'completed' && (
           <ReportSection
             type="other"
-            items={data.items.filter((item) => item.type === 'other')}
+            items={displayItems.filter((item) => item.type === 'other')}
             report={data}
             projects={projects.data!.projects}
             categories={categories.data!.categories}
@@ -340,6 +366,9 @@ export function ReportPage({ user }: { user: User }) {
             canPrevious={false}
             canNext={false}
             copied={false}
+            openDetailItemId={openDetails?.itemId ?? null}
+            onOpenDetails={openItemDetails}
+            onCloseDetails={() => setOpenDetails(null)}
             supplementary
           />
         )}
@@ -591,6 +620,9 @@ function ReportSection({
   canNext,
   onCopy,
   copied,
+  openDetailItemId,
+  onOpenDetails,
+  onCloseDetails,
   supplementary = false
 }: {
   type: ReportItemType;
@@ -610,6 +642,9 @@ function ReportSection({
   canNext: boolean;
   onCopy?: () => void;
   copied: boolean;
+  openDetailItemId: string | null;
+  onOpenDetails: (item: ReportItem) => void;
+  onCloseDetails: () => void;
   supplementary?: boolean;
 }) {
   const qc = useQueryClient();
@@ -810,6 +845,9 @@ function ReportSection({
                     onAdd={(categoryId) => onAdd(group.project?.id ?? null, categoryId)}
                     addingItem={addingItem}
                     onCreateCategory={onCreateCategory}
+                    openDetailItemId={openDetailItemId}
+                    onOpenDetails={onOpenDetails}
+                    onCloseDetails={onCloseDetails}
                   />
                 ))}
               </div>
@@ -895,7 +933,10 @@ function ProjectReportGroup({
   type,
   onAdd,
   addingItem,
-  onCreateCategory
+  onCreateCategory,
+  openDetailItemId,
+  onOpenDetails,
+  onCloseDetails
 }: {
   group: ProjectItemGroup;
   report: WeeklyReport;
@@ -905,6 +946,9 @@ function ProjectReportGroup({
   onAdd: (categoryId: string | null) => void;
   addingItem: boolean;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+  openDetailItemId: string | null;
+  onOpenDetails: (item: ReportItem) => void;
+  onCloseDetails: () => void;
 }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
@@ -1062,6 +1106,9 @@ function ProjectReportGroup({
             categories={categories}
             sequenceById={sequenceById}
             onCreateCategory={onCreateCategory}
+            openDetailItemId={openDetailItemId}
+            onOpenDetails={onOpenDetails}
+            onCloseDetails={onCloseDetails}
             projectArchived={projectArchived}
           />
         ))}
@@ -1124,6 +1171,9 @@ function CategoryReportGroup({
   categories,
   sequenceById,
   onCreateCategory,
+  openDetailItemId,
+  onOpenDetails,
+  onCloseDetails,
   projectArchived
 }: {
   group: CategoryItemGroup;
@@ -1133,6 +1183,9 @@ function CategoryReportGroup({
   categories: ReportCategory[];
   sequenceById: Map<string, number>;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+  openDetailItemId: string | null;
+  onOpenDetails: (item: ReportItem) => void;
+  onCloseDetails: () => void;
   projectArchived: boolean;
 }) {
   const qc = useQueryClient();
@@ -1247,6 +1300,9 @@ function CategoryReportGroup({
             projects={projects}
             categories={categories}
             onCreateCategory={onCreateCategory}
+            detailsOpen={openDetailItemId === item.id}
+            onOpenDetails={() => onOpenDetails(item)}
+            onCloseDetails={onCloseDetails}
           />
         ))}
       </div>
@@ -1501,7 +1557,10 @@ function ReportItemRow({
   sequence,
   projects,
   categories,
-  onCreateCategory
+  onCreateCategory,
+  detailsOpen,
+  onOpenDetails,
+  onCloseDetails
 }: {
   item: ReportItem;
   report: WeeklyReport;
@@ -1509,6 +1568,9 @@ function ReportItemRow({
   projects: Project[];
   categories: ReportCategory[];
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
+  detailsOpen: boolean;
+  onOpenDetails: () => void;
+  onCloseDetails: () => void;
 }) {
   const qc = useQueryClient();
   const [initialSnapshot] = useState<ItemDraftSnapshot<ItemDraft> | null>(() =>
@@ -1527,7 +1589,6 @@ function ReportItemRow({
   const [occurredOn, setOccurredOn] = useState(restoredDraft.occurredOn ?? '');
   const [tagIds, setTagIds] = useState(restoredDraft.tagIds);
   const [inlineEditing, setInlineEditing] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailEditing, setDetailEditing] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1767,7 +1828,7 @@ function ReportItemRow({
   const openDetails = () => {
     setInlineEditing(false);
     setDetailEditing(false);
-    setDetailsOpen(true);
+    onOpenDetails();
   };
   const retrySave = () => {
     deferredSave.cancel();
@@ -1938,10 +1999,10 @@ function ReportItemRow({
       <Modal
         open={detailsOpen}
         onOpenChange={(open) => {
-          setDetailsOpen(open);
           if (!open) {
             setDetailEditing(false);
             setFullscreenImage(null);
+            onCloseDetails();
           }
         }}
         title={`周报详情 · 第 ${sequence} 条`}

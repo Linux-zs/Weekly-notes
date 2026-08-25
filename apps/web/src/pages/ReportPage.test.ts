@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Project, ReportCategory, ReportItem, WeeklyReport } from '@zhoubao/shared';
 import {
+  applyOpenItemPlacement,
   buildReportText,
   clipboardImage,
   groupItemsByProjectAndCategory,
@@ -36,6 +37,27 @@ function item(id: string, categoryId: string | null, contentMd = id): ReportItem
 }
 
 describe('weekly report category presentation', () => {
+  it('keeps an open item in its original group until details close', () => {
+    const saved = {
+      ...item('moving', 'operations'),
+      projectId: 'project-b',
+      type: 'next_plan' as const
+    };
+
+    expect(
+      applyOpenItemPlacement([saved], {
+        itemId: saved.id,
+        placement: { projectId: 'project-a', categoryId: 'development', type: 'completed' }
+      })[0]
+    ).toMatchObject({
+      projectId: 'project-a',
+      categoryId: 'development',
+      type: 'completed',
+      version: saved.version
+    });
+    expect(applyOpenItemPlacement([saved], null)[0]).toBe(saved);
+  });
+
   it('selects supported clipboard images without intercepting ordinary clipboard data', () => {
     const png = { name: 'screenshot.png', type: 'image/png' } as File;
     const textItem = { kind: 'string', type: 'text/plain', getAsFile: () => null };
