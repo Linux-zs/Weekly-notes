@@ -42,7 +42,7 @@ import {
   RefreshCcw,
   Trash2
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../api';
 import { ErrorState, Loading, Modal, TagField } from '../components';
@@ -50,6 +50,7 @@ import { createDeferredAction } from '../deferred-action';
 import { createLatestTaskQueue } from '../latest-task-queue';
 import {
   createDraftChangeTracker,
+  readItemDraft,
   readOrMigrateItemDraft,
   removeItemDraft,
   writeItemDraft,
@@ -107,6 +108,7 @@ type ItemDraft = {
 type ItemSaveTask = { revision: number; draft: ItemDraft };
 type CategoryAssignment = { itemId: string; expectedVersion: number };
 type CreateCategoryInput = { name: string; assignments?: CategoryAssignment[] };
+type LiveDraftReader = () => ItemDraft;
 type OpenItemDetails = {
   itemId: string;
   placement: Pick<ReportItem, 'projectId' | 'categoryId' | 'type'>;
@@ -117,6 +119,9 @@ const progressLabels: Record<ReportItemProgress, string> = {
   incomplete: '推进中'
 };
 const supportedImageMimeTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const DraftRegistryContext = createContext<((itemId: string, reader: LiveDraftReader | null) => void) | null>(
+  null
+);
 
 type ClipboardImageSource = {
   items?: ArrayLike<Pick<DataTransferItem, 'getAsFile' | 'kind' | 'type'>>;
@@ -150,6 +155,23 @@ export function applyOpenItemPlacement(items: ReportItem[], openDetails: OpenIte
   return items.map((item) => (item.id === openDetails.itemId ? { ...item, ...openDetails.placement } : item));
 }
 
+export function reportWithLatestDrafts(
+  report: WeeklyReport,
+  liveDrafts: ReadonlyMap<string, ItemDraft>,
+  storedDraft: (itemId: string) => ItemDraft | null = (itemId) =>
+    readItemDraft<ItemDraft>(itemId)?.draft ?? null
+) {
+  return {
+    ...report,
+    items: report.items.map((item) => {
+      const draft = liveDrafts.get(item.id) ?? storedDraft(item.id);
+      if (!draft) return item;
+      const { tagIds: _tagIds, ...changes } = draft;
+      return { ...item, ...changes };
+    })
+  };
+}
+
 export function ReportPage({ user }: { user: User }) {
   const params = useParams();
   const current = isoWeekForDate(todayInTimezone(user.timezone));
@@ -157,7 +179,13 @@ export function ReportPage({ user }: { user: User }) {
   const week = Number(params.week) || current.week;
   const [activeSection, setActiveSection] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
   const [openDetails, setOpenDetails] = useState<OpenItemDetails | null>(null);
+  const liveDraftReaders = useRef(new Map<string, LiveDraftReader>());
+  const registerLiveDraft = useCallback((itemId: string, reader: LiveDraftReader | null) => {
+    if (reader) liveDraftReaders.current.set(itemId, reader);
+    else liveDraftReaders.current.delete(itemId);
+  }, []);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const report = useQuery({
@@ -269,11 +297,25 @@ export function ReportPage({ user }: { user: User }) {
     );
   };
   const copyReport = async () => {
-    await navigator.clipboard.writeText(
-      buildReportText(data, projects.data!.projects, categories.data!.categories)
+    setCopyError('');
+    const liveDrafts = new Map(
+      [...liveDraftReaders.current].map(([itemId, reader]) => [itemId, reader()] as const)
     );
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE');
+      await navigator.clipboard.writeText(
+        buildReportText(
+          reportWithLatestDrafts(data, liveDrafts),
+          projects.data!.projects,
+          categories.data!.categories
+        )
+      );
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+      setCopyError('复制汇报失败，请检查浏览器剪贴板权限后重试。');
+    }
   };
   return (
     <div className="page report-page">
@@ -324,55 +366,58 @@ export function ReportPage({ user }: { user: User }) {
       {createProject.error && (
         <div className="page-action-error">新增项目失败：{createProject.error.message}</div>
       )}
-      <div className="report-sections report-sections-focused">
-        <ReportSection
-          key={activeType}
-          index={activeSection}
-          type={activeType}
-          items={displayItems.filter((item) => item.type === activeType)}
-          report={data}
-          projects={projects.data!.projects}
-          categories={categories.data!.categories}
-          onAdd={(projectId, categoryId) => addMutation.mutate({ type: activeType, projectId, categoryId })}
-          addingItem={addMutation.isPending}
-          onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
-          onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
-          creatingProject={createProject.isPending}
-          onPrevious={() => changeSection(Math.max(0, activeSection - 1))}
-          onNext={() => changeSection(Math.min(sections.length - 1, activeSection + 1))}
-          canPrevious={activeSection > 0}
-          canNext={activeSection < sections.length - 1}
-          onCopy={activeType === 'completed' ? copyReport : undefined}
-          copied={copied}
-          openDetailItemId={openDetails?.itemId ?? null}
-          onOpenDetails={openItemDetails}
-          onCloseDetails={() => setOpenDetails(null)}
-        />
-        {activeType === 'completed' && (
+      {copyError && <div className="page-action-error">{copyError}</div>}
+      <DraftRegistryContext.Provider value={registerLiveDraft}>
+        <div className="report-sections report-sections-focused">
           <ReportSection
-            type="other"
-            items={displayItems.filter((item) => item.type === 'other')}
+            key={activeType}
+            index={activeSection}
+            type={activeType}
+            items={displayItems.filter((item) => item.type === activeType)}
             report={data}
             projects={projects.data!.projects}
             categories={categories.data!.categories}
-            onAdd={(projectId, categoryId) => addMutation.mutate({ type: 'other', projectId, categoryId })}
+            onAdd={(projectId, categoryId) => addMutation.mutate({ type: activeType, projectId, categoryId })}
             addingItem={addMutation.isPending}
             onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
-            onCreateProject={(draft) => createProject.mutateAsync({ type: 'other', draft })}
+            onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
             creatingProject={createProject.isPending}
-            index={activeSection}
-            onPrevious={() => undefined}
-            onNext={() => undefined}
-            canPrevious={false}
-            canNext={false}
-            copied={false}
+            onPrevious={() => changeSection(Math.max(0, activeSection - 1))}
+            onNext={() => changeSection(Math.min(sections.length - 1, activeSection + 1))}
+            canPrevious={activeSection > 0}
+            canNext={activeSection < sections.length - 1}
+            onCopy={activeType === 'completed' ? copyReport : undefined}
+            copied={copied}
             openDetailItemId={openDetails?.itemId ?? null}
             onOpenDetails={openItemDetails}
             onCloseDetails={() => setOpenDetails(null)}
-            supplementary
           />
-        )}
-      </div>
+          {activeType === 'completed' && (
+            <ReportSection
+              type="other"
+              items={displayItems.filter((item) => item.type === 'other')}
+              report={data}
+              projects={projects.data!.projects}
+              categories={categories.data!.categories}
+              onAdd={(projectId, categoryId) => addMutation.mutate({ type: 'other', projectId, categoryId })}
+              addingItem={addMutation.isPending}
+              onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
+              onCreateProject={(draft) => createProject.mutateAsync({ type: 'other', draft })}
+              creatingProject={createProject.isPending}
+              index={activeSection}
+              onPrevious={() => undefined}
+              onNext={() => undefined}
+              canPrevious={false}
+              canNext={false}
+              copied={false}
+              openDetailItemId={openDetails?.itemId ?? null}
+              onOpenDetails={openItemDetails}
+              onCloseDetails={() => setOpenDetails(null)}
+              supplementary
+            />
+          )}
+        </div>
+      </DraftRegistryContext.Provider>
     </div>
   );
 }
@@ -1573,6 +1618,7 @@ function ReportItemRow({
   onCloseDetails: () => void;
 }) {
   const qc = useQueryClient();
+  const registerLiveDraft = useContext(DraftRegistryContext);
   const [initialSnapshot] = useState<ItemDraftSnapshot<ItemDraft> | null>(() =>
     readOrMigrateItemDraft(item.id, item.version, itemDraft(item))
   );
@@ -1632,6 +1678,10 @@ function ReportItemRow({
     occurredOn: occurredOn || null,
     tagIds
   };
+  useEffect(() => {
+    registerLiveDraft?.(item.id, () => latestDraft.current);
+    return () => registerLiveDraft?.(item.id, null);
+  }, [item.id, registerLiveDraft]);
   const draftChanges = useRef(
     createDraftChangeTracker(restoredDraft, Boolean(initialSnapshot && !restoredConflict))
   ).current;

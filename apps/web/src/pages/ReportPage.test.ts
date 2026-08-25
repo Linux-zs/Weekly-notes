@@ -7,7 +7,8 @@ import {
   groupItemsByProjectAndCategory,
   lastActiveCategoryId,
   previousReportWeek,
-  reportProgressSummary
+  reportProgressSummary,
+  reportWithLatestDrafts
 } from './ReportPage';
 
 const projects: Project[] = [
@@ -56,6 +57,48 @@ describe('weekly report category presentation', () => {
       version: saved.version
     });
     expect(applyOpenItemPlacement([saved], null)[0]).toBe(saved);
+  });
+
+  it('prefers the current live draft when preparing copied report data', () => {
+    const serverItem = item('drafted', 'development', '服务器内容');
+    const report: WeeklyReport = {
+      id: 'report',
+      weekYear: 2026,
+      weekNumber: 34,
+      weekStart: '2026-08-17',
+      weekEnd: '2026-08-23',
+      version: 1,
+      author: { id: 'user', displayName: '测试用户', email: null, avatarUrl: null },
+      items: [serverItem],
+      calendarDays: [],
+      holidayDataAvailable: true
+    };
+    const liveDrafts = new Map([
+      [
+        serverItem.id,
+        {
+          contentMd: '刚刚输入的内容',
+          progress: 'incomplete' as const,
+          note: '本地备注',
+          projectId: serverItem.projectId,
+          categoryId: serverItem.categoryId,
+          type: serverItem.type,
+          occurredOn: '2026-08-19',
+          tagIds: []
+        }
+      ]
+    ]);
+
+    const latest = reportWithLatestDrafts(report, liveDrafts, () => ({
+      ...liveDrafts.get(serverItem.id)!,
+      contentMd: '较旧的持久化草稿'
+    }));
+    expect(latest.items[0]).toMatchObject({
+      contentMd: '刚刚输入的内容',
+      progress: 'incomplete',
+      note: '本地备注',
+      occurredOn: '2026-08-19'
+    });
   });
 
   it('selects supported clipboard images without intercepting ordinary clipboard data', () => {

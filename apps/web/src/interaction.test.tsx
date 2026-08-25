@@ -103,6 +103,12 @@ describe('interactive limits and login availability', () => {
 
     const openImport = await screen.findByRole('button', { name: '引入上周任务' });
     expect(screen.getByRole('button', { name: '添加一条本周完成' })).toBeTruthy();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) }
+    });
+    await userEvent.click(screen.getByRole('button', { name: '复制汇报' }));
+    expect(await screen.findByText('复制汇报失败，请检查浏览器剪贴板权限后重试。')).toBeTruthy();
     await userEvent.click(openImport);
     expect(await screen.findByRole('dialog', { name: '引入上周任务' })).toBeTruthy();
   });
