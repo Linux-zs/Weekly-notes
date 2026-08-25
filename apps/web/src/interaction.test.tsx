@@ -107,6 +107,93 @@ describe('interactive limits and login availability', () => {
     expect(await screen.findByRole('dialog', { name: '引入上周任务' })).toBeTruthy();
   });
 
+  it('opens details with one click and exposes explicit and keyboard editing', async () => {
+    const report = {
+      id: 'report-34',
+      weekYear: 2026,
+      weekNumber: 34,
+      weekStart: '2026-08-17',
+      weekEnd: '2026-08-23',
+      version: 1,
+      author: { id: 'user-1', displayName: '测试用户' },
+      items: [
+        {
+          id: 'item-1',
+          reportId: 'report-34',
+          importedFromItemId: null,
+          projectId: 'project-1',
+          categoryId: 'category-1',
+          type: 'completed' as const,
+          contentMd: '完成接口改造',
+          occurredOn: null,
+          progress: 'completed' as const,
+          note: '',
+          position: 0,
+          version: 1,
+          tags: []
+        }
+      ],
+      calendarDays: [],
+      holidayDataAvailable: true
+    };
+    mockedApi.mockImplementation((path: string) => {
+      if (path === '/api/reports/2026/34') return Promise.resolve(report) as never;
+      if (path === '/api/report-weeks/2026') return Promise.resolve({ year: 2026, weeks: [] }) as never;
+      if (path === '/api/projects')
+        return Promise.resolve({
+          projects: [{ id: 'project-1', name: '客户端', color: '#CF4F1C', position: 0, archivedAt: null }]
+        }) as never;
+      if (path === '/api/categories')
+        return Promise.resolve({
+          categories: [{ id: 'category-1', name: '开发', position: 0, archivedAt: null }]
+        }) as never;
+      if (path === '/api/report-items/item-1/attachments')
+        return Promise.resolve({ attachments: [] }) as never;
+      throw new Error(`Unexpected API path: ${path}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      queryWrapper(
+        client,
+        <MemoryRouter initialEntries={['/week/2026/34']}>
+          <Routes>
+            <Route
+              path="/week/:year/:week"
+              element={
+                <ReportPage
+                  user={{
+                    id: 'user-1',
+                    displayName: '测试用户',
+                    email: null,
+                    avatarUrl: null,
+                    timezone: 'Asia/Shanghai'
+                  }}
+                />
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      )
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '完成接口改造' }));
+    expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await userEvent.click(screen.getByRole('button', { name: '编辑第 1 条内容' }));
+    expect(screen.getByRole('textbox', { name: '本周完成第 1 条内容' })).toBeTruthy();
+    await userEvent.keyboard('{Escape}');
+
+    const projectName = screen.getByRole('button', { name: '客户端' });
+    projectName.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('textbox', { name: '编辑项目名称' })).toBeTruthy();
+    await userEvent.keyboard('{Escape}');
+    const categoryName = screen.getByRole('button', { name: '编辑分类 开发' });
+    categoryName.focus();
+    await userEvent.keyboard('{F2}');
+    expect(screen.getByRole('textbox', { name: '编辑分类 开发' })).toBeTruthy();
+  });
+
   it('disables new tag choices at the per-item limit but still allows removal', async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } }

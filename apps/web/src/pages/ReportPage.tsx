@@ -969,6 +969,11 @@ function ProjectReportGroup({
     if (name && name !== group.project?.name) saveProjectName.mutate(name);
     else setProjectName(group.project?.name ?? '');
   };
+  const beginRename = () => {
+    if (saveProjectName.isPending) return;
+    saveProjectName.reset();
+    setRenaming(true);
+  };
   const finishNewCategory = () => {
     if (createProjectCategory.isPending) return;
     const name = newCategoryName.trim();
@@ -1015,16 +1020,26 @@ function ProjectReportGroup({
           ) : group.project ? (
             <button
               className="project-name-display"
-              onDoubleClick={() => setRenaming(true)}
-              title="双击修改项目名称"
+              onDoubleClick={beginRename}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== 'F2') return;
+                event.preventDefault();
+                beginRename();
+              }}
+              title="双击或按 Enter/F2 修改项目名称"
             >
               {group.project.name}
             </button>
           ) : (
             <button
               className="project-name-display"
-              onDoubleClick={() => setRenaming(true)}
-              title="双击创建项目"
+              onDoubleClick={beginRename}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== 'F2') return;
+                event.preventDefault();
+                beginRename();
+              }}
+              title="双击或按 Enter/F2 创建项目"
             >
               未归属
             </button>
@@ -1171,6 +1186,12 @@ function CategoryReportGroup({
     saveCategory.reset();
     setRenaming(false);
   };
+  const beginCategoryRename = () => {
+    if (saveCategory.isPending) return;
+    saveCategory.reset();
+    setCategoryError('');
+    setRenaming(true);
+  };
   return (
     <section
       ref={drop.setNodeRef}
@@ -1178,13 +1199,16 @@ function CategoryReportGroup({
     >
       <div
         className={`category-group-label${renaming ? ' category-label-editing' : ''}`}
-        onDoubleClick={() => {
-          if (saveCategory.isPending) return;
-          saveCategory.reset();
-          setCategoryError('');
-          setRenaming(true);
+        onDoubleClick={beginCategoryRename}
+        onKeyDown={(event) => {
+          if (renaming || (event.key !== 'Enter' && event.key !== 'F2')) return;
+          event.preventDefault();
+          beginCategoryRename();
         }}
-        title="双击编辑分类"
+        role={renaming ? undefined : 'button'}
+        tabIndex={renaming ? -1 : 0}
+        aria-label={renaming ? undefined : `编辑分类 ${group.category?.name ?? '未分类'}`}
+        title="双击或按 Enter/F2 编辑分类"
       >
         {renaming ? (
           <input
@@ -1520,7 +1544,6 @@ function ReportItemRow({
   const acknowledgedRevision = useRef(0);
   const mounted = useRef(true);
   const skipNextSave = useRef(false);
-  const clickTimer = useRef<number | undefined>(undefined);
   const deferredSave = useRef(createDeferredAction()).current;
   const saveTaskHandler = useRef<(task: ItemSaveTask) => Promise<void>>(async () => undefined);
   const saveQueue = useRef(
@@ -1612,7 +1635,6 @@ function ReportItemRow({
     mounted.current = true;
     return () => {
       mounted.current = false;
-      window.clearTimeout(clickTimer.current);
       deferredSave.flush();
     };
   }, [deferredSave]);
@@ -1742,12 +1764,7 @@ function ReportItemRow({
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
     }
   });
-  const singleClick = () => {
-    window.clearTimeout(clickTimer.current);
-    clickTimer.current = window.setTimeout(() => setInlineEditing(true), 210);
-  };
-  const doubleClick = () => {
-    window.clearTimeout(clickTimer.current);
+  const openDetails = () => {
     setInlineEditing(false);
     setDetailEditing(false);
     setDetailsOpen(true);
@@ -1796,11 +1813,7 @@ function ReportItemRow({
               aria-label={`${sectionLabels[item.type]}第 ${sequence} 条内容`}
             />
           ) : (
-            <button
-              className={`row-content-preview${content ? '' : ' placeholder'}`}
-              onClick={singleClick}
-              onDoubleClick={doubleClick}
-            >
+            <button className={`row-content-preview${content ? '' : ' placeholder'}`} onClick={openDetails}>
               <span className="row-content-text">
                 <span>{displayContent}</span>
               </span>
@@ -1846,6 +1859,14 @@ function ReportItemRow({
               <RefreshCcw size={14} />
             </button>
           )}
+          <button
+            className="icon-button edit-item"
+            onClick={() => setInlineEditing(true)}
+            aria-label={`编辑第 ${sequence} 条内容`}
+            title="行内编辑"
+          >
+            <Pencil size={15} />
+          </button>
           <button
             className="icon-button danger"
             onClick={() => {
