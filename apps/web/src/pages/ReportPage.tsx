@@ -779,6 +779,12 @@ function ReportSection({
                 {copied ? '已复制' : '复制汇报'}
               </button>
             )}
+            {!supplementary && (
+              <button className="button secondary compact-button" onClick={() => setImportOpen(true)}>
+                <Download size={15} />
+                引入上周任务
+              </button>
+            )}
             <button className="button ghost" onClick={openProjectEditor}>
               <Plus size={17} />
               新增项目
@@ -804,7 +810,6 @@ function ReportSection({
                     onAdd={(categoryId) => onAdd(group.project?.id ?? null, categoryId)}
                     addingItem={addingItem}
                     onCreateCategory={onCreateCategory}
-                    onImport={() => setImportOpen(true)}
                   />
                 ))}
               </div>
@@ -890,8 +895,7 @@ function ProjectReportGroup({
   type,
   onAdd,
   addingItem,
-  onCreateCategory,
-  onImport
+  onCreateCategory
 }: {
   group: ProjectItemGroup;
   report: WeeklyReport;
@@ -901,7 +905,6 @@ function ProjectReportGroup({
   onAdd: (categoryId: string | null) => void;
   addingItem: boolean;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
-  onImport: () => void;
 }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
@@ -1044,7 +1047,6 @@ function ProjectReportGroup({
             categories={categories}
             sequenceById={sequenceById}
             onCreateCategory={onCreateCategory}
-            onImport={onImport}
             projectArchived={projectArchived}
           />
         ))}
@@ -1107,7 +1109,6 @@ function CategoryReportGroup({
   categories,
   sequenceById,
   onCreateCategory,
-  onImport,
   projectArchived
 }: {
   group: CategoryItemGroup;
@@ -1117,7 +1118,6 @@ function CategoryReportGroup({
   categories: ReportCategory[];
   sequenceById: Map<string, number>;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
-  onImport: () => void;
   projectArchived: boolean;
 }) {
   const qc = useQueryClient();
@@ -1223,7 +1223,6 @@ function CategoryReportGroup({
             projects={projects}
             categories={categories}
             onCreateCategory={onCreateCategory}
-            onImport={onImport}
           />
         ))}
       </div>
@@ -1478,8 +1477,7 @@ function ReportItemRow({
   sequence,
   projects,
   categories,
-  onCreateCategory,
-  onImport
+  onCreateCategory
 }: {
   item: ReportItem;
   report: WeeklyReport;
@@ -1487,7 +1485,6 @@ function ReportItemRow({
   projects: Project[];
   categories: ReportCategory[];
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
-  onImport: () => void;
 }) {
   const qc = useQueryClient();
   const [initialSnapshot] = useState<ItemDraftSnapshot<ItemDraft> | null>(() =>
@@ -1849,14 +1846,6 @@ function ReportItemRow({
               <RefreshCcw size={14} />
             </button>
           )}
-          <button
-            className="icon-button import-item"
-            onClick={onImport}
-            aria-label="引入上周任务"
-            title="从上周引入任务"
-          >
-            <Download size={15} />
-          </button>
           <button
             className="icon-button danger"
             onClick={() => {

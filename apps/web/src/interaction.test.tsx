@@ -5,11 +5,12 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { api } from './api';
 import { LoginPage } from './App';
 import { TagField } from './components';
 import { SearchPage } from './pages/SearchPage';
+import { ReportPage } from './pages/ReportPage';
 
 vi.mock('./api', () => ({
   api: vi.fn()
@@ -47,6 +48,65 @@ afterEach(() => {
 });
 
 describe('interactive limits and login availability', () => {
+  it('offers previous-week import from an empty report section', async () => {
+    const report = {
+      id: 'report-34',
+      weekYear: 2026,
+      weekNumber: 34,
+      weekStart: '2026-08-17',
+      weekEnd: '2026-08-23',
+      version: 1,
+      author: { id: 'user-1', displayName: '测试用户' },
+      items: [],
+      calendarDays: [],
+      holidayDataAvailable: true
+    };
+    mockedApi.mockImplementation((path: string) => {
+      if (path === '/api/reports/2026/34') return Promise.resolve(report) as never;
+      if (path === '/api/reports/2026/33')
+        return Promise.resolve({
+          ...report,
+          id: 'report-33',
+          weekNumber: 33,
+          weekStart: '2026-08-10',
+          weekEnd: '2026-08-16'
+        }) as never;
+      if (path === '/api/report-weeks/2026') return Promise.resolve({ year: 2026, weeks: [] }) as never;
+      if (path === '/api/projects') return Promise.resolve({ projects: [] }) as never;
+      if (path === '/api/categories') return Promise.resolve({ categories: [] }) as never;
+      throw new Error(`Unexpected API path: ${path}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      queryWrapper(
+        client,
+        <MemoryRouter initialEntries={['/week/2026/34']}>
+          <Routes>
+            <Route
+              path="/week/:year/:week"
+              element={
+                <ReportPage
+                  user={{
+                    id: 'user-1',
+                    displayName: '测试用户',
+                    email: null,
+                    avatarUrl: null,
+                    timezone: 'Asia/Shanghai'
+                  }}
+                />
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      )
+    );
+
+    const openImport = await screen.findByRole('button', { name: '引入上周任务' });
+    expect(screen.getByRole('button', { name: '添加一条本周完成' })).toBeTruthy();
+    await userEvent.click(openImport);
+    expect(await screen.findByRole('dialog', { name: '引入上周任务' })).toBeTruthy();
+  });
+
   it('disables new tag choices at the per-item limit but still allows removal', async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } }
