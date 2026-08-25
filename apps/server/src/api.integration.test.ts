@@ -43,6 +43,59 @@ function listFiles(root: string): string[] {
 }
 
 describe('authenticated weekly report workflow', () => {
+  it('excludes blank placeholders and keeps search pagination stable', async () => {
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2040/1',
+      headers: headers(),
+      payload: {}
+    });
+    expect(report.statusCode).toBe(200);
+    const createdIds: string[] = [];
+    for (let index = 0; index < 22; index += 1) {
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/reports/${report.json().id}/items`,
+        headers: headers(),
+        payload: { type: 'completed', contentMd: `稳定分页 ${index + 1}` }
+      });
+      expect(created.statusCode).toBe(201);
+      createdIds.push(created.json().id);
+    }
+    const blank = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'completed', contentMd: '   \n  ' }
+    });
+    expect(blank.statusCode).toBe(201);
+    sqlite
+      .prepare("UPDATE report_items SET position=0,created_at='2040-01-01T00:00:00.000Z' WHERE report_id=?")
+      .run(report.json().id);
+    const range = `from=${report.json().weekStart}&to=${report.json().weekEnd}`;
+    const firstPage = await app.inject({ method: 'GET', url: `/api/search?${range}`, headers: headers() });
+    const secondPage = await app.inject({
+      method: 'GET',
+      url: `/api/search?${range}&page=2`,
+      headers: headers()
+    });
+    const repeatedFirstPage = await app.inject({
+      method: 'GET',
+      url: `/api/search?${range}`,
+      headers: headers()
+    });
+    expect(firstPage.statusCode).toBe(200);
+    expect(secondPage.statusCode).toBe(200);
+    const resultIds = [
+      ...firstPage.json().items.map((item: { id: string }) => item.id),
+      ...secondPage.json().items.map((item: { id: string }) => item.id)
+    ];
+    expect(resultIds).toHaveLength(22);
+    expect(new Set(resultIds)).toEqual(new Set(createdIds));
+    expect(resultIds).not.toContain(blank.json().id);
+    expect(repeatedFirstPage.json().items).toEqual(firstPage.json().items);
+  });
+
   it('only reports catalog conflicts for actual unique constraint failures', async () => {
     const first = await app.inject({
       method: 'POST',
