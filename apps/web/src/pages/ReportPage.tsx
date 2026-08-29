@@ -128,6 +128,20 @@ type ClipboardImageSource = {
   files?: ArrayLike<File>;
 };
 
+export function formatWeekHeadingDate(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'Asia/Shanghai'
+  }).format(new Date(`${value}T00:00:00+08:00`));
+}
+
+export function shouldShowWeekScrollSummary(
+  entry: Pick<IntersectionObserverEntry, 'isIntersecting' | 'boundingClientRect'>
+) {
+  return !entry.isIntersecting && entry.boundingClientRect.bottom <= 0;
+}
+
 export function clipboardImage(source: ClipboardImageSource): File | null {
   for (const item of Array.from(source.items ?? [])) {
     if (item.kind !== 'file' || !supportedImageMimeTypes.has(item.type)) continue;
@@ -192,6 +206,8 @@ export function ReportPage({ user }: { user: User }) {
   const [copyError, setCopyError] = useState('');
   const [detailLinkError, setDetailLinkError] = useState('');
   const [openDetails, setOpenDetails] = useState<OpenItemDetails | null>(null);
+  const [weekHeroElement, setWeekHeroElement] = useState<HTMLElement | null>(null);
+  const [showWeekScrollSummary, setShowWeekScrollSummary] = useState(false);
   const handledDetailLink = useRef<string | null>(null);
   const liveDraftReaders = useRef(new Map<string, LiveDraftReader>());
   const registerLiveDraft = useCallback((itemId: string, reader: LiveDraftReader | null) => {
@@ -216,6 +232,16 @@ export function ReportPage({ user }: { user: User }) {
     queryKey: ['categories'],
     queryFn: () => api<{ categories: ReportCategory[] }>('/api/categories')
   });
+  useEffect(() => {
+    setShowWeekScrollSummary(false);
+    if (!weekHeroElement || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setShowWeekScrollSummary(shouldShowWeekScrollSummary(entry));
+    });
+    observer.observe(weekHeroElement);
+    return () => observer.disconnect();
+  }, [weekHeroElement, year, week]);
   useEffect(() => {
     setActiveSection(0);
     setOpenDetails(null);
@@ -387,18 +413,35 @@ export function ReportPage({ user }: { user: User }) {
   };
   return (
     <div className="page report-page">
-      <header className="week-hero">
+      {showWeekScrollSummary && (
+        <div className="week-scroll-summary" aria-hidden="true">
+          <div className="week-scroll-summary-inner">
+            <span>第{week}周</span>
+            <strong>
+              {formatWeekHeadingDate(data.weekStart)}—{formatWeekHeadingDate(data.weekEnd)}
+            </strong>
+            <span>
+              汇报人：<b>{user.displayName}</b>
+            </span>
+          </div>
+        </div>
+      )}
+      <header className="week-hero" ref={setWeekHeroElement}>
         <div className="week-main-row">
           <div className="week-title-block">
-            <div className="week-kicker">
-              <CalendarDays size={16} />
-              <span>
-                {year} · WEEK {String(week).padStart(2, '0')}
-              </span>
-            </div>
             <h1>工作汇报</h1>
-            <p>
-              {formatDate(data.weekStart)} — {formatDate(data.weekEnd)} · 汇报人：{user.displayName}
+            <div
+              className="week-date-line"
+              aria-label={`${year} 年第 ${week} 周，${formatWeekHeadingDate(data.weekStart)}至${formatWeekHeadingDate(data.weekEnd)}`}
+            >
+              <CalendarDays size={18} aria-hidden="true" />
+              <strong>
+                {formatWeekHeadingDate(data.weekStart)}—{formatWeekHeadingDate(data.weekEnd)}
+              </strong>
+              <span>第{week}周</span>
+            </div>
+            <p className="week-byline">
+              {year} 年 · 汇报人：{user.displayName}
             </p>
             <HolidaySummary report={data} />
           </div>
@@ -581,7 +624,6 @@ function WeekNavigator({
         <small>
           {year} · 共 {total} 周
         </small>
-        <strong>第 {selectedWeek} 周</strong>
         <ChevronDown size={16} />
       </button>
       {open && (

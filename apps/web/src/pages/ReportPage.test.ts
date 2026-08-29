@@ -4,11 +4,13 @@ import {
   applyOpenItemPlacement,
   buildReportText,
   clipboardImage,
+  formatWeekHeadingDate,
   groupItemsByProjectAndCategory,
   lastActiveCategoryId,
   previousReportWeek,
   reportProgressSummary,
-  reportWithLatestDrafts
+  reportWithLatestDrafts,
+  shouldShowWeekScrollSummary
 } from './ReportPage';
 
 const projects: Project[] = [
@@ -38,6 +40,33 @@ function item(id: string, categoryId: string | null, contentMd = id): ReportItem
 }
 
 describe('weekly report category presentation', () => {
+  it('formats heading dates without leading zeroes across month and year boundaries', () => {
+    expect(formatWeekHeadingDate('2026-08-24')).toBe('8月24日');
+    expect(formatWeekHeadingDate('2025-12-29')).toBe('12月29日');
+    expect(formatWeekHeadingDate('2026-01-04')).toBe('1月4日');
+  });
+
+  it('shows the scroll summary only after the overview has passed above the viewport', () => {
+    expect(
+      shouldShowWeekScrollSummary({
+        isIntersecting: false,
+        boundingClientRect: { bottom: 120 } as DOMRectReadOnly
+      })
+    ).toBe(false);
+    expect(
+      shouldShowWeekScrollSummary({
+        isIntersecting: true,
+        boundingClientRect: { bottom: 40 } as DOMRectReadOnly
+      })
+    ).toBe(false);
+    expect(
+      shouldShowWeekScrollSummary({
+        isIntersecting: false,
+        boundingClientRect: { bottom: -1 } as DOMRectReadOnly
+      })
+    ).toBe(true);
+  });
+
   it('keeps an open item in its original group until details close', () => {
     const saved = {
       ...item('moving', 'operations'),

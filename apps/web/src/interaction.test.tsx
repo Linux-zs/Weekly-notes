@@ -48,6 +48,7 @@ function renderSearchPage(
 afterEach(() => {
   cleanup();
   mockedApi.mockReset();
+  vi.unstubAllGlobals();
 });
 
 describe('interactive limits and login availability', () => {
@@ -105,6 +106,9 @@ describe('interactive limits and login availability', () => {
     );
 
     const openImport = await screen.findByRole('button', { name: '引入上周任务' });
+    expect(screen.getByText('8月17日—8月23日')).toBeTruthy();
+    expect(screen.getAllByText('第34周')).toHaveLength(1);
+    expect(screen.queryByText(/WEEK 34/)).toBeNull();
     expect(screen.getByText('未找到要打开的周报条目，可能已被删除或不属于当前周。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '添加一条本周完成' })).toBeTruthy();
     Object.defineProperty(navigator, 'clipboard', {
@@ -115,6 +119,110 @@ describe('interactive limits and login availability', () => {
     expect(await screen.findByText('复制汇报失败，请检查浏览器剪贴板权限后重试。')).toBeTruthy();
     await userEvent.click(openImport);
     expect(await screen.findByRole('dialog', { name: '引入上周任务' })).toBeTruthy();
+  });
+
+  it('shows the desktop week context only after the full overview scrolls above the viewport', async () => {
+    let intersectionCallback: IntersectionObserverCallback | null = null;
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '0px';
+      readonly thresholds = [0];
+      constructor(callback: IntersectionObserverCallback) {
+        intersectionCallback = callback;
+      }
+      disconnect = vi.fn();
+      observe = vi.fn();
+      takeRecords = () => [];
+      unobserve = vi.fn();
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+    const report = {
+      id: 'report-34',
+      weekYear: 2026,
+      weekNumber: 34,
+      weekStart: '2026-08-17',
+      weekEnd: '2026-08-23',
+      version: 1,
+      author: { id: 'user-1', displayName: '测试用户' },
+      items: [],
+      calendarDays: [],
+      holidayDataAvailable: true
+    };
+    mockedApi.mockImplementation((path: string) => {
+      if (path === '/api/reports/2026/34') return Promise.resolve(report) as never;
+      if (path === '/api/report-weeks/2026') return Promise.resolve({ year: 2026, weeks: [] }) as never;
+      if (path === '/api/projects') return Promise.resolve({ projects: [] }) as never;
+      if (path === '/api/categories') return Promise.resolve({ categories: [] }) as never;
+      throw new Error(`Unexpected API path: ${path}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      queryWrapper(
+        client,
+        <MemoryRouter initialEntries={['/week/2026/34']}>
+          <Routes>
+            <Route
+              path="/week/:year/:week"
+              element={
+                <ReportPage
+                  user={{
+                    id: 'user-1',
+                    displayName: '测试用户',
+                    email: null,
+                    avatarUrl: null,
+                    timezone: 'Asia/Shanghai'
+                  }}
+                />
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      )
+    );
+
+    await screen.findByRole('button', { name: '引入上周任务' });
+    expect(document.querySelector('.week-scroll-summary')).toBeNull();
+    expect(intersectionCallback).not.toBeNull();
+    act(() => {
+      intersectionCallback!(
+        [
+          {
+            isIntersecting: false,
+            boundingClientRect: { bottom: 120 }
+          } as IntersectionObserverEntry
+        ],
+        {} as IntersectionObserver
+      );
+    });
+    expect(document.querySelector('.week-scroll-summary')).toBeNull();
+    act(() => {
+      intersectionCallback!(
+        [
+          {
+            isIntersecting: false,
+            boundingClientRect: { bottom: -1 }
+          } as IntersectionObserverEntry
+        ],
+        {} as IntersectionObserver
+      );
+    });
+    const summary = document.querySelector('.week-scroll-summary');
+    expect(summary?.textContent).toContain('第34周');
+    expect(summary?.textContent).toContain('8月17日—8月23日');
+    expect(summary?.textContent).toContain('汇报人：测试用户');
+    expect(summary?.getAttribute('aria-hidden')).toBe('true');
+    act(() => {
+      intersectionCallback!(
+        [
+          {
+            isIntersecting: true,
+            boundingClientRect: { bottom: 46 }
+          } as IntersectionObserverEntry
+        ],
+        {} as IntersectionObserver
+      );
+    });
+    expect(document.querySelector('.week-scroll-summary')).toBeNull();
   });
 
   it('opens details with one click and exposes explicit and keyboard editing', async () => {
