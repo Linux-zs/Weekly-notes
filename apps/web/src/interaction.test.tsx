@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { api } from './api';
+import { UI_THEME_STORAGE_KEY } from './appearance';
 import { LoginPage } from './App';
 import { TagField } from './components';
-import { SearchPage } from './pages/SearchPage';
 import { ReportPage } from './pages/ReportPage';
+import { SearchPage } from './pages/SearchPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 vi.mock('./api', () => ({
   api: vi.fn()
@@ -49,9 +51,58 @@ afterEach(() => {
   cleanup();
   mockedApi.mockReset();
   vi.unstubAllGlobals();
+  localStorage.removeItem(UI_THEME_STORAGE_KEY);
+  document.documentElement.dataset.theme = 'paperline';
 });
 
 describe('interactive limits and login availability', () => {
+  it('switches visual themes from the settings page without changing density', async () => {
+    mockedApi.mockImplementation((path: string) => {
+      if (path === '/api/settings')
+        return Promise.resolve({
+          profile: {
+            displayName: '测试用户',
+            email: 'user@example.com',
+            timezone: 'Asia/Shanghai',
+            avatarUrl: null
+          },
+          workspace: { id: 'workspace-1', name: '个人空间', type: 'personal' },
+          workspaces: [{ id: 'workspace-1', name: '个人空间', type: 'personal', role: 'owner' }],
+          members: [],
+          invitations: [],
+          role: 'owner'
+        }) as never;
+      if (path === '/api/auth/accounts') return Promise.resolve({ accounts: [] }) as never;
+      if (path === '/api/auth/providers')
+        return Promise.resolve({ devAuthEnabled: true, providers: [] }) as never;
+      if (path === '/api/tags') return Promise.resolve({ tags: [] }) as never;
+      if (path === '/api/categories') return Promise.resolve({ categories: [] }) as never;
+      if (path === '/api/projects') return Promise.resolve({ projects: [] }) as never;
+      throw new Error(`Unexpected API path: ${path}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      queryWrapper(
+        client,
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      )
+    );
+
+    const paperline = await screen.findByRole('radio', { name: /Paperline/ });
+    const glass = screen.getByRole('radio', { name: /iOS 玻璃/ });
+    const compact = screen.getByRole('checkbox', { name: '启用紧凑模式' });
+    expect((paperline as HTMLInputElement).checked).toBe(true);
+    expect((glass as HTMLInputElement).checked).toBe(false);
+    glass.focus();
+    await userEvent.keyboard(' ');
+    expect((glass as HTMLInputElement).checked).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe('ios-glass');
+    expect(localStorage.getItem(UI_THEME_STORAGE_KEY)).toBe('ios-glass');
+    expect((compact as HTMLInputElement).checked).toBe(false);
+  });
+
   it('offers previous-week import from an empty report section', async () => {
     const report = {
       id: 'report-34',

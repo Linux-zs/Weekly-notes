@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { readUiTheme, saveUiTheme, type UiTheme } from '../appearance';
 import { ErrorState, Loading, Modal } from '../components';
 import { ProjectSettings } from './ProjectsPage';
 
@@ -53,6 +54,10 @@ type Account = {
   lastLoginAt: string | null;
 };
 const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
+const themeOptions: Array<{ value: UiTheme; name: string; description: string }> = [
+  { value: 'paperline', name: 'Paperline', description: '灰白纸页与陶橙强调' },
+  { value: 'ios-glass', name: 'iOS 玻璃', description: '透白磨砂与系统蓝强调' }
+];
 
 export function SettingsPage() {
   const qc = useQueryClient();
@@ -141,6 +146,7 @@ function SettingsContent({
   const [editCategory, setEditCategory] = useState<ReportCategory | null>(null);
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [compact, setCompact] = useState(() => localStorage.getItem('weekly-report:compact') === 'true');
+  const [theme, setTheme] = useState<UiTheme>(() => readUiTheme());
   useEffect(() => {
     if (location.hash === '#projects')
       requestAnimationFrame(() => document.getElementById('projects')?.scrollIntoView({ block: 'start' }));
@@ -281,6 +287,10 @@ function SettingsContent({
     setCompact(value);
     localStorage.setItem('weekly-report:compact', String(value));
     document.documentElement.classList.toggle('compact-ui', value);
+  };
+  const applyTheme = (value: UiTheme) => {
+    setTheme(value);
+    saveUiTheme(value);
   };
   const invitationVerificationRequired =
     new URLSearchParams(location.search).get('invite') === 'verification_required';
@@ -720,16 +730,49 @@ function SettingsContent({
             <Palette />
           </div>
           <div className="settings-body">
-            <h2>界面密度</h2>
-            <p>紧凑模式会同步收紧页面留白、卡片间距与列表行高，适合信息较多的汇报。</p>
-            <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={compact}
-                onChange={(event) => applyCompact(event.target.checked)}
-              />
-              <span>启用紧凑模式</span>
-            </label>
+            <h2>界面外观</h2>
+            <p>选择适合当前环境的界面材质；主题与紧凑模式可以独立组合。</p>
+            <fieldset className="theme-picker">
+              <legend>主题</legend>
+              <div className="theme-options">
+                {themeOptions.map((option) => (
+                  <label
+                    className={`theme-option${theme === option.value ? ' selected' : ''}`}
+                    key={option.value}
+                  >
+                    <input
+                      type="radio"
+                      name="ui-theme"
+                      value={option.value}
+                      checked={theme === option.value}
+                      onChange={() => applyTheme(option.value)}
+                    />
+                    <span className={`theme-preview preview-${option.value}`} aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    <span className="theme-option-copy">
+                      <strong>{option.name}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                    <CheckCircle2 size={16} aria-hidden="true" />
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="density-setting">
+              <strong>界面密度</strong>
+              <span>收紧页面留白、卡片间距与列表行高，适合信息较多的汇报。</span>
+              <label className="switch-row">
+                <input
+                  type="checkbox"
+                  checked={compact}
+                  onChange={(event) => applyCompact(event.target.checked)}
+                />
+                <span>启用紧凑模式</span>
+              </label>
+            </div>
           </div>
         </section>
       </div>

@@ -3,7 +3,10 @@ import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
 import { App } from './App';
+import { initializeUiTheme } from './appearance';
 import './styles.css';
+
+initializeUiTheme();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 20_000 }, mutations: { retry: 0 } }
