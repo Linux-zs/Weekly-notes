@@ -2049,16 +2049,26 @@ function ReportItemRow({
               aria-label={`${sectionLabels[item.type]}第 ${sequence} 条内容`}
             />
           ) : (
-            <button className={`row-content-preview${content ? '' : ' placeholder'}`} onClick={openDetails}>
-              <span className="row-content-text">
-                <span>{displayContent}</span>
-              </span>
-              {hasMarkdownImage(content) && (
-                <span className="row-image-indicator" role="img" aria-label="包含图片" title="包含图片">
-                  <ImageIcon size={14} />
+            <>
+              <button className={`row-content-preview${content ? '' : ' placeholder'}`} onClick={openDetails}>
+                <span className="row-content-text">
+                  <span>{displayContent}</span>
                 </span>
-              )}
-            </button>
+                {hasMarkdownImage(content) && (
+                  <span className="row-image-indicator" role="img" aria-label="包含图片" title="包含图片">
+                    <ImageIcon size={14} />
+                  </span>
+                )}
+              </button>
+              <button
+                className="icon-button edit-item row-content-edit"
+                onClick={() => setInlineEditing(true)}
+                aria-label={`编辑第 ${sequence} 条内容`}
+                title="行内编辑"
+              >
+                <Pencil size={15} />
+              </button>
+            </>
           )}
         </div>
         <label className={`item-progress-cell progress-${itemMeta.progress}`}>
@@ -2095,14 +2105,6 @@ function ReportItemRow({
               <RefreshCcw size={14} />
             </button>
           )}
-          <button
-            className="icon-button edit-item"
-            onClick={() => setInlineEditing(true)}
-            aria-label={`编辑第 ${sequence} 条内容`}
-            title="行内编辑"
-          >
-            <Pencil size={15} />
-          </button>
           <button
             className="icon-button danger"
             onClick={() => {

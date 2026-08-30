@@ -368,7 +368,10 @@ describe('interactive limits and login availability', () => {
     await userEvent.click(screen.getByRole('button', { name: '完成接口改造' }));
     expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '关闭' }));
-    await userEvent.click(screen.getByRole('button', { name: '编辑第 1 条内容' }));
+    const editContent = screen.getByRole('button', { name: '编辑第 1 条内容' });
+    expect(editContent.closest('.row-content-cell')).toBeTruthy();
+    expect(editContent.closest('.row-actions')).toBeNull();
+    await userEvent.click(editContent);
     expect(screen.getByRole('textbox', { name: '本周完成第 1 条内容' })).toBeTruthy();
     await userEvent.keyboard('{Escape}');
 
