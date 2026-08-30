@@ -965,15 +965,25 @@ function ReportSection({
           </div>
           <div className="section-heading-actions">
             {onCopy && (
-              <button className="button secondary compact-button" onClick={onCopy}>
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-                {copied ? '已复制' : '复制汇报'}
+              <button
+                type="button"
+                className="icon-button bordered"
+                onClick={onCopy}
+                aria-label={copied ? '已复制' : '复制汇报'}
+                title={copied ? '已复制' : '复制汇报'}
+              >
+                {copied ? <Check size={16} /> : <Copy size={16} />}
               </button>
             )}
             {!supplementary && (
-              <button className="button secondary compact-button" onClick={() => setImportOpen(true)}>
-                <Download size={15} />
-                引入上周任务
+              <button
+                type="button"
+                className="icon-button bordered"
+                onClick={() => setImportOpen(true)}
+                aria-label="引入上周任务"
+                title="引入上周任务"
+              >
+                <Download size={16} />
               </button>
             )}
             <button className="button ghost" onClick={openProjectEditor}>
@@ -2039,16 +2049,26 @@ function ReportItemRow({
               aria-label={`${sectionLabels[item.type]}第 ${sequence} 条内容`}
             />
           ) : (
-            <button className={`row-content-preview${content ? '' : ' placeholder'}`} onClick={openDetails}>
-              <span className="row-content-text">
-                <span>{displayContent}</span>
-              </span>
-              {hasMarkdownImage(content) && (
-                <span className="row-image-indicator" role="img" aria-label="包含图片" title="包含图片">
-                  <ImageIcon size={14} />
+            <>
+              <button className={`row-content-preview${content ? '' : ' placeholder'}`} onClick={openDetails}>
+                <span className="row-content-text">
+                  <span>{displayContent}</span>
                 </span>
-              )}
-            </button>
+                {hasMarkdownImage(content) && (
+                  <span className="row-image-indicator" role="img" aria-label="包含图片" title="包含图片">
+                    <ImageIcon size={14} />
+                  </span>
+                )}
+              </button>
+              <button
+                className="icon-button edit-item row-content-edit"
+                onClick={() => setInlineEditing(true)}
+                aria-label={`编辑第 ${sequence} 条内容`}
+                title="行内编辑"
+              >
+                <Pencil size={15} />
+              </button>
+            </>
           )}
         </div>
         <label className={`item-progress-cell progress-${itemMeta.progress}`}>
@@ -2085,14 +2105,6 @@ function ReportItemRow({
               <RefreshCcw size={14} />
             </button>
           )}
-          <button
-            className="icon-button edit-item"
-            onClick={() => setInlineEditing(true)}
-            aria-label={`编辑第 ${sequence} 条内容`}
-            title="行内编辑"
-          >
-            <Pencil size={15} />
-          </button>
           <button
             className="icon-button danger"
             onClick={() => {

@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { api } from './api';
+import { UI_THEME_STORAGE_KEY } from './appearance';
 import { LoginPage } from './App';
 import { TagField } from './components';
-import { SearchPage } from './pages/SearchPage';
 import { ReportPage } from './pages/ReportPage';
+import { SearchPage } from './pages/SearchPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 vi.mock('./api', () => ({
   api: vi.fn()
@@ -49,9 +51,58 @@ afterEach(() => {
   cleanup();
   mockedApi.mockReset();
   vi.unstubAllGlobals();
+  localStorage.removeItem(UI_THEME_STORAGE_KEY);
+  document.documentElement.dataset.theme = 'paperline';
 });
 
 describe('interactive limits and login availability', () => {
+  it('switches visual themes from the settings page without changing density', async () => {
+    mockedApi.mockImplementation((path: string) => {
+      if (path === '/api/settings')
+        return Promise.resolve({
+          profile: {
+            displayName: '测试用户',
+            email: 'user@example.com',
+            timezone: 'Asia/Shanghai',
+            avatarUrl: null
+          },
+          workspace: { id: 'workspace-1', name: '个人空间', type: 'personal' },
+          workspaces: [{ id: 'workspace-1', name: '个人空间', type: 'personal', role: 'owner' }],
+          members: [],
+          invitations: [],
+          role: 'owner'
+        }) as never;
+      if (path === '/api/auth/accounts') return Promise.resolve({ accounts: [] }) as never;
+      if (path === '/api/auth/providers')
+        return Promise.resolve({ devAuthEnabled: true, providers: [] }) as never;
+      if (path === '/api/tags') return Promise.resolve({ tags: [] }) as never;
+      if (path === '/api/categories') return Promise.resolve({ categories: [] }) as never;
+      if (path === '/api/projects') return Promise.resolve({ projects: [] }) as never;
+      throw new Error(`Unexpected API path: ${path}`);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      queryWrapper(
+        client,
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      )
+    );
+
+    const paperline = await screen.findByRole('radio', { name: /Paperline/ });
+    const glass = screen.getByRole('radio', { name: /iOS 玻璃/ });
+    const compact = screen.getByRole('checkbox', { name: '启用紧凑模式' });
+    expect((paperline as HTMLInputElement).checked).toBe(true);
+    expect((glass as HTMLInputElement).checked).toBe(false);
+    glass.focus();
+    await userEvent.keyboard(' ');
+    expect((glass as HTMLInputElement).checked).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe('ios-glass');
+    expect(localStorage.getItem(UI_THEME_STORAGE_KEY)).toBe('ios-glass');
+    expect((compact as HTMLInputElement).checked).toBe(false);
+  });
+
   it('offers previous-week import from an empty report section', async () => {
     const report = {
       id: 'report-34',
@@ -106,17 +157,30 @@ describe('interactive limits and login availability', () => {
     );
 
     const openImport = await screen.findByRole('button', { name: '引入上周任务' });
+    expect(openImport.textContent).toBe('');
+    expect(openImport.getAttribute('title')).toBe('引入上周任务');
     expect(screen.getByText('8月17日—8月23日')).toBeTruthy();
     expect(screen.getAllByText('第34周')).toHaveLength(1);
     expect(screen.queryByText(/WEEK 34/)).toBeNull();
     expect(screen.getByText('未找到要打开的周报条目，可能已被删除或不属于当前周。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '添加一条本周完成' })).toBeTruthy();
+    const copyReport = screen.getByRole('button', { name: '复制汇报' });
+    expect(copyReport.textContent).toBe('');
+    expect(copyReport.getAttribute('title')).toBe('复制汇报');
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) }
     });
-    await userEvent.click(screen.getByRole('button', { name: '复制汇报' }));
+    await userEvent.click(copyReport);
     expect(await screen.findByText('复制汇报失败，请检查浏览器剪贴板权限后重试。')).toBeTruthy();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) }
+    });
+    await userEvent.click(copyReport);
+    const copiedReport = await screen.findByRole('button', { name: '已复制' });
+    expect(copiedReport.textContent).toBe('');
+    expect(copiedReport.getAttribute('title')).toBe('已复制');
     await userEvent.click(openImport);
     expect(await screen.findByRole('dialog', { name: '引入上周任务' })).toBeTruthy();
   });
@@ -304,7 +368,10 @@ describe('interactive limits and login availability', () => {
     await userEvent.click(screen.getByRole('button', { name: '完成接口改造' }));
     expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '关闭' }));
-    await userEvent.click(screen.getByRole('button', { name: '编辑第 1 条内容' }));
+    const editContent = screen.getByRole('button', { name: '编辑第 1 条内容' });
+    expect(editContent.closest('.row-content-cell')).toBeTruthy();
+    expect(editContent.closest('.row-actions')).toBeNull();
+    await userEvent.click(editContent);
     expect(screen.getByRole('textbox', { name: '本周完成第 1 条内容' })).toBeTruthy();
     await userEvent.keyboard('{Escape}');
 
