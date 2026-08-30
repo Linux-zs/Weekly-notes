@@ -157,17 +157,30 @@ describe('interactive limits and login availability', () => {
     );
 
     const openImport = await screen.findByRole('button', { name: '引入上周任务' });
+    expect(openImport.textContent).toBe('');
+    expect(openImport.getAttribute('title')).toBe('引入上周任务');
     expect(screen.getByText('8月17日—8月23日')).toBeTruthy();
     expect(screen.getAllByText('第34周')).toHaveLength(1);
     expect(screen.queryByText(/WEEK 34/)).toBeNull();
     expect(screen.getByText('未找到要打开的周报条目，可能已被删除或不属于当前周。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '添加一条本周完成' })).toBeTruthy();
+    const copyReport = screen.getByRole('button', { name: '复制汇报' });
+    expect(copyReport.textContent).toBe('');
+    expect(copyReport.getAttribute('title')).toBe('复制汇报');
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) }
     });
-    await userEvent.click(screen.getByRole('button', { name: '复制汇报' }));
+    await userEvent.click(copyReport);
     expect(await screen.findByText('复制汇报失败，请检查浏览器剪贴板权限后重试。')).toBeTruthy();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) }
+    });
+    await userEvent.click(copyReport);
+    const copiedReport = await screen.findByRole('button', { name: '已复制' });
+    expect(copiedReport.textContent).toBe('');
+    expect(copiedReport.getAttribute('title')).toBe('已复制');
     await userEvent.click(openImport);
     expect(await screen.findByRole('dialog', { name: '引入上周任务' })).toBeTruthy();
   });

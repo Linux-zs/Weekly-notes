@@ -965,15 +965,25 @@ function ReportSection({
           </div>
           <div className="section-heading-actions">
             {onCopy && (
-              <button className="button secondary compact-button" onClick={onCopy}>
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-                {copied ? '已复制' : '复制汇报'}
+              <button
+                type="button"
+                className="icon-button bordered"
+                onClick={onCopy}
+                aria-label={copied ? '已复制' : '复制汇报'}
+                title={copied ? '已复制' : '复制汇报'}
+              >
+                {copied ? <Check size={16} /> : <Copy size={16} />}
               </button>
             )}
             {!supplementary && (
-              <button className="button secondary compact-button" onClick={() => setImportOpen(true)}>
-                <Download size={15} />
-                引入上周任务
+              <button
+                type="button"
+                className="icon-button bordered"
+                onClick={() => setImportOpen(true)}
+                aria-label="引入上周任务"
+                title="引入上周任务"
+              >
+                <Download size={16} />
               </button>
             )}
             <button className="button ghost" onClick={openProjectEditor}>
