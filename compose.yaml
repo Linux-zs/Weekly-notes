@@ -1,6 +1,6 @@
 services:
   app:
-    image: weekly-notes:latest
+    image: ghcr.io/linux-zs/weekly-notes:latest
     restart: unless-stopped
     env_file: .env
     environment:
