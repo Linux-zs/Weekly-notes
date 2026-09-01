@@ -151,6 +151,10 @@ export function clipboardImage(source: ClipboardImageSource): File | null {
   return Array.from(source.files ?? []).find((file) => supportedImageMimeTypes.has(file.type)) ?? null;
 }
 
+function normalizeCategoryName(name: string) {
+  return name.normalize('NFKC').toLocaleLowerCase('zh-CN');
+}
+
 function itemDraft(item: ReportItem): ItemDraft {
   return {
     contentMd: item.contentMd,
@@ -292,7 +296,7 @@ export function ReportPage({ user }: { user: User }) {
       let data = report.data!;
       if (!data.id)
         data = await api<WeeklyReport>(`/api/reports/${year}/${week}`, { method: 'PUT', body: '{}' });
-      return api(`/api/reports/${data.id}/items`, {
+      return api<ReportItem>(`/api/reports/${data.id}/items`, {
         method: 'POST',
         body: JSON.stringify({ type, projectId, categoryId, contentMd: '' })
       });
@@ -489,7 +493,9 @@ export function ReportPage({ user }: { user: User }) {
             report={data}
             projects={projects.data!.projects}
             categories={categories.data!.categories}
-            onAdd={(projectId, categoryId) => addMutation.mutate({ type: activeType, projectId, categoryId })}
+            onAdd={(projectId, categoryId) =>
+              addMutation.mutateAsync({ type: activeType, projectId, categoryId })
+            }
             addingItem={addMutation.isPending}
             onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
             onCreateProject={(draft) => createProject.mutateAsync({ type: activeType, draft })}
@@ -511,7 +517,9 @@ export function ReportPage({ user }: { user: User }) {
               report={data}
               projects={projects.data!.projects}
               categories={categories.data!.categories}
-              onAdd={(projectId, categoryId) => addMutation.mutate({ type: 'other', projectId, categoryId })}
+              onAdd={(projectId, categoryId) =>
+                addMutation.mutateAsync({ type: 'other', projectId, categoryId })
+              }
               addingItem={addMutation.isPending}
               onCreateCategory={(name, assignments) => createCategory.mutateAsync({ name, assignments })}
               onCreateProject={(draft) => createProject.mutateAsync({ type: 'other', draft })}
@@ -786,7 +794,7 @@ function ReportSection({
   report: WeeklyReport;
   projects: Project[];
   categories: ReportCategory[];
-  onAdd: (projectId: string | null, categoryId: string | null) => void;
+  onAdd: (projectId: string | null, categoryId: string | null) => Promise<ReportItem>;
   addingItem: boolean;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
   onCreateProject: (draft: ProjectDraft) => Promise<Project>;
@@ -1020,7 +1028,7 @@ function ReportSection({
             </SortableContext>
           </DndContext>
         ) : (
-          <button className="section-empty" disabled={addingItem} onClick={() => onAdd(null, null)}>
+          <button className="section-empty" disabled={addingItem} onClick={() => void onAdd(null, null)}>
             <Plus size={18} />
             <span>{addingItem ? '添加中…' : `添加一条${sectionLabels[type]}`}</span>
           </button>
@@ -1109,7 +1117,7 @@ function ProjectReportGroup({
   projects: Project[];
   categories: ReportCategory[];
   type: ReportItemType;
-  onAdd: (categoryId: string | null) => void;
+  onAdd: (categoryId: string | null) => Promise<ReportItem>;
   addingItem: boolean;
   onCreateCategory: (name: string, assignments?: CategoryAssignment[]) => Promise<ReportCategory>;
   openDetailItemId: string | null;
@@ -1119,9 +1127,7 @@ function ProjectReportGroup({
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [projectName, setProjectName] = useState(group.project?.name ?? '');
-  const [addingCategory, setAddingCategory] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCategoryError, setNewCategoryError] = useState('');
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const projectArchived = Boolean(group.project?.archivedAt);
   const projectDrop = useDroppable({
     id: `project-drop:${group.key}`,
@@ -1165,9 +1171,6 @@ function ProjectReportGroup({
       });
     },
     onSuccess: () => {
-      setAddingCategory(false);
-      setNewCategoryName('');
-      setNewCategoryError('');
       qc.invalidateQueries({ queryKey: ['categories'] });
       qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
@@ -1183,22 +1186,6 @@ function ProjectReportGroup({
     if (saveProjectName.isPending) return;
     saveProjectName.reset();
     setRenaming(true);
-  };
-  const finishNewCategory = () => {
-    if (createProjectCategory.isPending) return;
-    const name = newCategoryName.trim();
-    if (!name) {
-      setNewCategoryError('请输入分类名称');
-      return;
-    }
-    setNewCategoryError('');
-    createProjectCategory.mutate(name);
-  };
-  const cancelNewCategory = () => {
-    setAddingCategory(false);
-    setNewCategoryName('');
-    setNewCategoryError('');
-    createProjectCategory.reset();
   };
   const sequenceById = new Map(
     group.categoryGroups
@@ -1280,44 +1267,22 @@ function ProjectReportGroup({
         ))}
         {!projectArchived && (
           <div className="project-add-row">
-            <div className={`project-category-add${addingCategory ? ' editing' : ''}`}>
-              {addingCategory ? (
-                <>
-                  <input
-                    autoFocus
-                    value={newCategoryName}
-                    onChange={(event) => setNewCategoryName(event.target.value)}
-                    onBlur={finishNewCategory}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') event.currentTarget.blur();
-                      if (event.key === 'Escape') cancelNewCategory();
-                    }}
-                    maxLength={40}
-                    placeholder="分类名称"
-                    aria-label={`为${group.project?.name ?? '未归属'}新增分类`}
-                    disabled={createProjectCategory.isPending}
-                  />
-                  {(newCategoryError || createProjectCategory.error) && (
-                    <small>{newCategoryError || createProjectCategory.error?.message}</small>
-                  )}
-                </>
-              ) : (
-                <button
-                  onClick={() => {
-                    createProjectCategory.reset();
-                    setNewCategoryError('');
-                    setAddingCategory(true);
-                  }}
-                >
-                  <Plus size={12} />
-                  新增分类
-                </button>
-              )}
+            <div className="project-category-add">
+              <button
+                disabled={addingItem || createProjectCategory.isPending}
+                onClick={() => {
+                  createProjectCategory.reset();
+                  setCategoryPickerOpen(true);
+                }}
+              >
+                <Plus size={12} />
+                添加分类
+              </button>
             </div>
             <button
               className="project-row-add"
               disabled={addingItem}
-              onClick={() => onAdd(defaultCategoryId)}
+              onClick={() => void onAdd(defaultCategoryId)}
             >
               <Plus size={13} />
               {addingItem ? '添加中…' : '添加一条'}
@@ -1325,7 +1290,174 @@ function ProjectReportGroup({
           </div>
         )}
       </div>
+      <CategoryPickerModal
+        open={categoryPickerOpen}
+        onOpenChange={setCategoryPickerOpen}
+        projectName={group.project?.name ?? '未归属'}
+        categories={categories}
+        onUseCategory={onAdd}
+        onCreateCategory={(name) => createProjectCategory.mutateAsync(name)}
+      />
     </section>
+  );
+}
+
+function CategoryPickerModal({
+  open,
+  onOpenChange,
+  projectName,
+  categories,
+  onUseCategory,
+  onCreateCategory
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectName: string;
+  categories: ReportCategory[];
+  onUseCategory: (categoryId: string) => Promise<unknown>;
+  onCreateCategory: (name: string) => Promise<unknown>;
+}) {
+  const activeCategories = categories.filter((category) => !category.archivedAt);
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  const trimmedName = name.trim();
+  const matchingCategory = trimmedName
+    ? categories.find(
+        (category) => normalizeCategoryName(category.name) === normalizeCategoryName(trimmedName)
+      )
+    : undefined;
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedCategoryId(activeCategories[0]?.id ?? '');
+    setName('');
+    setError('');
+    setPending(false);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const perform = async (action: () => Promise<unknown>) => {
+    setPending(true);
+    setError('');
+    try {
+      await action();
+      onOpenChange(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '分类添加失败');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const submitExistingCategory = () => {
+    if (!selectedCategoryId) {
+      setError('请选择分类');
+      return;
+    }
+    void perform(() => onUseCategory(selectedCategoryId));
+  };
+
+  const createOrReuseCategory = () => {
+    if (!trimmedName) {
+      setError('请输入分类名称');
+      return;
+    }
+    if (matchingCategory?.archivedAt) {
+      setError('该分类已停用，请到设置中恢复后使用');
+      return;
+    }
+    void perform(() =>
+      matchingCategory ? onUseCategory(matchingCategory.id) : onCreateCategory(trimmedName)
+    );
+  };
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(value) => !pending && onOpenChange(value)}
+      title={`添加分类 · ${projectName}`}
+      description="选择分类后将在当前栏目添加一条空白任务。"
+    >
+      <div className="category-picker-panel">
+        <form
+          className="category-picker-section"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitExistingCategory();
+          }}
+        >
+          <label>
+            选择已有分类
+            <select
+              autoFocus={activeCategories.length > 0}
+              value={selectedCategoryId}
+              onChange={(event) => {
+                setSelectedCategoryId(event.target.value);
+                setError('');
+              }}
+              disabled={!activeCategories.length || pending}
+            >
+              {!activeCategories.length && <option value="">暂无使用中的分类</option>}
+              {activeCategories.map((category) => (
+                <option value={category.id} key={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="button secondary" disabled={!selectedCategoryId || pending}>
+            {pending ? '添加中…' : '使用分类'}
+          </button>
+        </form>
+
+        <div className="category-picker-divider" role="separator">
+          <span>或新建分类</span>
+        </div>
+
+        <form
+          className="category-picker-section"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createOrReuseCategory();
+          }}
+        >
+          <label>
+            分类名称
+            <input
+              autoFocus={!activeCategories.length}
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setError('');
+              }}
+              maxLength={40}
+              placeholder="例如：开发、运维"
+              disabled={pending}
+            />
+          </label>
+          {matchingCategory && (
+            <div
+              className={`category-picker-match${matchingCategory.archivedAt ? ' archived' : ''}`}
+              role={matchingCategory.archivedAt ? 'alert' : 'status'}
+            >
+              {matchingCategory.archivedAt
+                ? '该分类已停用，请到设置中恢复后使用'
+                : '已存在同名分类，提交后将直接使用。'}
+            </div>
+          )}
+          <button className="button" disabled={pending || Boolean(matchingCategory?.archivedAt)}>
+            {pending ? '处理中…' : matchingCategory ? '使用已有分类' : '创建并使用'}
+          </button>
+        </form>
+
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 

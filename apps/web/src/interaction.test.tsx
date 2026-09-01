@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
@@ -42,6 +42,70 @@ function renderSearchPage(
       client,
       <MemoryRouter>
         <SearchPage />
+      </MemoryRouter>
+    )
+  );
+}
+
+const categoryPickerUser = {
+  id: 'user-1',
+  displayName: '测试用户',
+  email: null,
+  avatarUrl: null,
+  timezone: 'Asia/Shanghai'
+};
+
+function renderCategoryPickerReport(
+  categories: Array<{ id: string; name: string; position: number; archivedAt: string | null }>,
+  mutate: (path: string, init?: RequestInit) => Promise<unknown>
+) {
+  const report = {
+    id: 'report-34',
+    weekYear: 2026,
+    weekNumber: 34,
+    weekStart: '2026-08-17',
+    weekEnd: '2026-08-23',
+    version: 1,
+    author: { id: 'user-1', displayName: '测试用户' },
+    items: [
+      {
+        id: 'item-1',
+        reportId: 'report-34',
+        importedFromItemId: null,
+        projectId: 'project-1',
+        categoryId: 'category-devops',
+        type: 'completed' as const,
+        contentMd: '已有任务',
+        occurredOn: null,
+        progress: 'completed' as const,
+        note: '',
+        position: 0,
+        version: 1,
+        tags: []
+      }
+    ],
+    calendarDays: [],
+    holidayDataAvailable: true
+  };
+  mockedApi.mockImplementation((path: string, init?: RequestInit) => {
+    if (path === '/api/reports/2026/34') return Promise.resolve(report) as never;
+    if (path === '/api/report-weeks/2026')
+      return Promise.resolve({ year: 2026, weeks: [{ weekNumber: 34, itemCount: 1 }] }) as never;
+    if (path === '/api/projects')
+      return Promise.resolve({
+        projects: [{ id: 'project-1', name: '客户端', color: '#CF4F1C', position: 0, archivedAt: null }]
+      }) as never;
+    if (path === '/api/categories') return Promise.resolve({ categories }) as never;
+    return mutate(path, init) as never;
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    queryWrapper(
+      client,
+      <MemoryRouter initialEntries={['/week/2026/34']}>
+        <Routes>
+          <Route path="/week/:year/:week" element={<ReportPage user={categoryPickerUser} />} />
+        </Routes>
       </MemoryRouter>
     )
   );
@@ -384,6 +448,118 @@ describe('interactive limits and login availability', () => {
     categoryName.focus();
     await userEvent.keyboard('{F2}');
     expect(screen.getByRole('textbox', { name: '编辑分类 开发' })).toBeTruthy();
+  });
+
+  it('adds a blank item with an existing active category from the unified picker', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    renderCategoryPickerReport(
+      [
+        { id: 'category-devops', name: 'DevOps', position: 0, archivedAt: null },
+        { id: 'category-operations', name: '运维', position: 1, archivedAt: null },
+        { id: 'category-archived', name: '历史分类', position: 2, archivedAt: '2026-08-01T00:00:00Z' }
+      ],
+      (path, init) => {
+        if (path === '/api/reports/report-34/items') {
+          requests.push({ path, body: JSON.parse(String(init?.body)) });
+          return Promise.resolve({ id: 'item-new' });
+        }
+        throw new Error(`Unexpected API path: ${path}`);
+      }
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '添加分类' }));
+    let dialog = screen.getByRole('dialog', { name: '添加分类 · 客户端' });
+    expect(dialog.textContent).toContain('选择分类后将在当前栏目添加一条空白任务。');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '添加分类 · 客户端' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: '添加分类' }));
+    dialog = screen.getByRole('dialog', { name: '添加分类 · 客户端' });
+    expect(dialog).toBeTruthy();
+    expect(screen.queryByRole('option', { name: '历史分类' })).toBeNull();
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: '选择已有分类' }),
+      'category-operations'
+    );
+    await userEvent.click(screen.getByRole('button', { name: '使用分类' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加分类 · 客户端' })).toBeNull());
+    expect(requests).toEqual([
+      {
+        path: '/api/reports/report-34/items',
+        body: {
+          type: 'completed',
+          projectId: 'project-1',
+          categoryId: 'category-operations',
+          contentMd: ''
+        }
+      }
+    ]);
+  });
+
+  it('reuses a normalized active name and blocks an archived category name', async () => {
+    const mutationPaths: string[] = [];
+    renderCategoryPickerReport(
+      [
+        { id: 'category-devops', name: 'DevOps', position: 0, archivedAt: null },
+        { id: 'category-archived', name: '历史分类', position: 1, archivedAt: '2026-08-01T00:00:00Z' }
+      ],
+      (path) => {
+        mutationPaths.push(path);
+        if (path === '/api/reports/report-34/items') return Promise.resolve({ id: 'item-new' });
+        throw new Error(`Unexpected API path: ${path}`);
+      }
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '添加分类' }));
+    await userEvent.type(screen.getByRole('textbox', { name: '分类名称' }), 'ＤｅｖＯｐｓ');
+    expect(screen.getByText('已存在同名分类，提交后将直接使用。')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '使用已有分类' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加分类 · 客户端' })).toBeNull());
+    expect(mutationPaths).toEqual(['/api/reports/report-34/items']);
+
+    await userEvent.click(screen.getByRole('button', { name: '添加分类' }));
+    await userEvent.type(screen.getByRole('textbox', { name: '分类名称' }), '历史分类');
+    expect(screen.queryByRole('option', { name: '历史分类' })).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('该分类已停用，请到设置中恢复后使用');
+    expect((screen.getByRole('button', { name: '使用已有分类' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mutationPaths).toEqual(['/api/reports/report-34/items']);
+  });
+
+  it('keeps the picker open on failure and still creates a genuinely new category', async () => {
+    const requests: Array<{ path: string; body?: Record<string, unknown> }> = [];
+    renderCategoryPickerReport(
+      [
+        { id: 'category-devops', name: 'DevOps', position: 0, archivedAt: null },
+        { id: 'category-operations', name: '运维', position: 1, archivedAt: null }
+      ],
+      (path, init) => {
+        requests.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        if (path === '/api/reports/report-34/items') return Promise.reject(new Error('分类添加失败，请重试'));
+        if (path === '/api/reports/report-34/categories')
+          return Promise.resolve({ category: { id: 'category-new' }, item: { id: 'item-new' } });
+        throw new Error(`Unexpected API path: ${path}`);
+      }
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '添加分类' }));
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: '选择已有分类' }),
+      'category-operations'
+    );
+    await userEvent.click(screen.getByRole('button', { name: '使用分类' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('分类添加失败，请重试');
+    expect(screen.getByRole('dialog', { name: '添加分类 · 客户端' })).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: '选择已有分类' }) as HTMLSelectElement).value).toBe(
+      'category-operations'
+    );
+
+    await userEvent.type(screen.getByRole('textbox', { name: '分类名称' }), '客户支持');
+    await userEvent.click(screen.getByRole('button', { name: '创建并使用' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加分类 · 客户端' })).toBeNull());
+    expect(requests.at(-1)).toEqual({
+      path: '/api/reports/report-34/categories',
+      body: { name: '客户支持', projectId: 'project-1', type: 'completed' }
+    });
   });
 
   it('disables new tag choices at the per-item limit but still allows removal', async () => {
