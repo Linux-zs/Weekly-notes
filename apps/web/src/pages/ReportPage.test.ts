@@ -140,7 +140,7 @@ describe('weekly report category presentation', () => {
     expect(clipboardImage({ files: [{ name: 'photo.bmp', type: 'image/bmp' } as File] })).toBeNull();
   });
 
-  it('merges all items of the same category and keeps uncategorized items last', () => {
+  it('keeps categories in first-item order and uncategorized items last', () => {
     const groups = groupItemsByProjectAndCategory(
       [
         item('ops-1', 'operations'),
@@ -154,11 +154,11 @@ describe('weekly report category presentation', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.categoryGroups.map((group) => group.category?.name ?? '未分类')).toEqual([
-      '开发',
       '运维',
+      '开发',
       '未分类'
     ]);
-    expect(groups[0]?.categoryGroups[0]?.items.map((entry) => entry.id)).toEqual(['dev-1', 'dev-2']);
+    expect(groups[0]?.categoryGroups[1]?.items.map((entry) => entry.id)).toEqual(['dev-1', 'dev-2']);
   });
 
   it('keeps archived project names in historical report groups', () => {
@@ -226,8 +226,8 @@ describe('weekly report category presentation', () => {
     };
 
     const text = buildReportText(report, projects, categories);
-    expect(text).toContain('1. [开发] 完成接口改造');
-    expect(text).toContain('2. [运维] 处理告警');
+    expect(text).toContain('1. [运维] 处理告警');
+    expect(text).toContain('2. [开发] 完成接口改造');
     expect(text).toContain('3. [未分类] 整理记录');
   });
 

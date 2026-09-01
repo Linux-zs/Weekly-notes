@@ -696,14 +696,11 @@ export function groupItemsByProjectAndCategory(
       categoryGroup.items.push(item);
       categoryGroups.set(key, categoryGroup);
     }
-    group.categoryGroups = [...categoryGroups.values()].sort((left, right) => {
-      if (!left.category) return 1;
-      if (!right.category) return -1;
-      return (
-        left.category.position - right.category.position ||
-        left.category.name.localeCompare(right.category.name)
-      );
-    });
+    const orderedCategoryGroups = [...categoryGroups.values()];
+    group.categoryGroups = [
+      ...orderedCategoryGroups.filter((categoryGroup) => categoryGroup.category),
+      ...orderedCategoryGroups.filter((categoryGroup) => !categoryGroup.category)
+    ];
   }
   return [...groups.values()].sort((left, right) => {
     if (!left.project) return 1;
