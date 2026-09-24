@@ -56,7 +56,7 @@ type Account = {
 const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 const themeOptions: Array<{ value: UiTheme; name: string; description: string }> = [
   { value: 'paperline', name: 'Paperline', description: '灰白纸页与陶橙强调' },
-  { value: 'ios-glass', name: 'iOS 玻璃', description: '透白磨砂与系统蓝强调' }
+  { value: 'ios-glass', name: 'iOS 玻璃', description: '液态玻璃与系统蓝强调' }
 ];
 
 export function SettingsPage() {
