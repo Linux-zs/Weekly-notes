@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { BookOpenText, LogOut, Search, Settings } from 'lucide-react';
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { api, ApiError } from './api';
 import { Loading } from './components';
@@ -30,8 +30,11 @@ type Me = {
 
 export function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const barRef = useRef<HTMLElement>(null);
   const highlightRef = useRef<HTMLSpanElement>(null);
+  // 拖拽结束后的下一次 click 需要被吞掉（跨 effect 重挂载保持）。
+  const suppressClickRef = useRef(false);
   useEffect(() => {
     document.documentElement.classList.toggle(
       'compact-ui',
@@ -39,62 +42,58 @@ export function App() {
     );
   }, []);
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/api/me'), retry: false });
-  // 液态玻璃导航：将高亮滑块定位到当前激活的菜单项上。
+  // 液态玻璃导航：严格移植“纯CSS液态玻璃”示例脚本
+  // （拖拽吸附、液滴拉伸/收缩/回弹、指针光源与阴影、光源 320ms 回中）。
   useEffect(() => {
     const bar = barRef.current;
-    const highlight = highlightRef.current;
+    const indicator = highlightRef.current;
     const menu = bar?.querySelector('nav');
-    if (!bar || !highlight || !menu) return;
-    const place = () => {
-      const links = menu.querySelectorAll('a');
-      const active =
-        menu.querySelector('a.active') ??
-        (location.pathname.startsWith('/week') ? links[0] : null);
-      if (!active) {
-        highlight.style.setProperty('--indicator-w', '0px');
-        highlight.style.setProperty('--indicator-h', '0px');
-        return;
-      }
-      const barBox = bar.getBoundingClientRect();
-      const box = active.getBoundingClientRect();
-      highlight.style.setProperty('--indicator-x', `${box.left - barBox.left}px`);
-      highlight.style.setProperty('--indicator-y', `${box.top - barBox.top}px`);
-      highlight.style.setProperty('--indicator-w', `${box.width}px`);
-      highlight.style.setProperty('--indicator-h', `${box.height}px`);
-    };
-    place();
-    window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
-  }, [me.data, location.pathname]);
-  // 液态玻璃光源：跟随指针移动，移出后平滑回到中心。
-  useEffect(() => {
-    const bar = barRef.current;
-    if (!bar) return;
+    if (!bar || !indicator || !menu) return;
+    const links: HTMLAnchorElement[] = Array.from(menu.querySelectorAll('a'));
+    if (links.length === 0) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const center = 50;
     const resetDuration = 320;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     const clamp = (value: number, min: number, max: number) =>
       Math.min(Math.max(value, min), max);
-    let frame = 0;
+
+    let resetFrame = 0;
+    let resetTimer = 0;
     let lightX = center;
     let lightY = center;
+    let pointerDown = false;
+    let dragging = false;
+    let dragMoved = false;
+    let dragStartX = 0;
+    let dragStartPosition = 0;
+    let previousPointerX = 0;
+    let dragStretch = 1;
+    let currentX = 0;
+    let currentW = 0;
+
     const setLight = (x: number, y: number) => {
       lightX = x;
       lightY = y;
-      bar.style.setProperty('--light-x', `${x.toFixed(2)}%`);
-      bar.style.setProperty('--light-y', `${y.toFixed(2)}%`);
-      bar.style.setProperty('--shadow-x', `${((center - x) * 0.14).toFixed(2)}px`);
-      bar.style.setProperty('--shadow-y', `${(4 + (center - y) * 0.14).toFixed(2)}px`);
+      indicator.style.setProperty('--light-x', `${x.toFixed(2)}%`);
+      indicator.style.setProperty('--light-y', `${y.toFixed(2)}%`);
+      indicator.style.setProperty('--shadow-x', `${((center - x) * 0.14).toFixed(2)}px`);
+      indicator.style.setProperty(
+        '--shadow-y',
+        `${(4 + (center - y) * 0.14).toFixed(2)}px`
+      );
     };
-    const cancel = () => {
-      if (frame) {
-        cancelAnimationFrame(frame);
-        frame = 0;
+
+    const cancelReset = () => {
+      if (resetFrame) {
+        cancelAnimationFrame(resetFrame);
+        resetFrame = 0;
       }
     };
-    const reset = () => {
-      cancel();
-      if (reduced.matches) {
+
+    const resetLight = () => {
+      if (dragging) return;
+      cancelReset();
+      if (reduceMotion.matches) {
         setLight(center, center);
         return;
       }
@@ -108,28 +107,206 @@ export function App() {
           startX + (center - startX) * eased,
           startY + (center - startY) * eased
         );
-        frame = progress < 1 ? requestAnimationFrame(animate) : 0;
+        resetFrame = progress < 1 ? requestAnimationFrame(animate) : 0;
       };
-      frame = requestAnimationFrame(animate);
+      resetFrame = requestAnimationFrame(animate);
     };
+
+    const activeIndex = () => {
+      const index = links.findIndex((link) => link.classList.contains('active'));
+      if (index >= 0) return index;
+      return location.pathname.startsWith('/week') ? 0 : -1;
+    };
+
+    const setActive = (index: number) => {
+      links.forEach((link, current) => {
+        const active = current === index;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      });
+    };
+
+    const measure = () => {
+      const index = activeIndex();
+      if (index < 0) return;
+      const barBox = bar.getBoundingClientRect();
+      const box = links[index].getBoundingClientRect();
+      currentW = box.width;
+      currentX = box.left - barBox.left;
+      indicator.style.setProperty('--indicator-x', `${currentX}px`);
+      indicator.style.setProperty('--indicator-y', `${box.top - barBox.top}px`);
+      indicator.style.setProperty('--indicator-w', `${currentW}px`);
+      indicator.style.setProperty('--indicator-h', `${box.height}px`);
+    };
+
+    const dragLimits = () => {
+      const barBox = bar.getBoundingClientRect();
+      const first = links[0].getBoundingClientRect();
+      const last = links[links.length - 1].getBoundingClientRect();
+      return {
+        min: first.left - barBox.left,
+        max: last.right - barBox.left - currentW
+      };
+    };
+
+    const nearestIndex = () => {
+      const barBox = bar.getBoundingClientRect();
+      const indicatorCenter = currentX + currentW / 2;
+      let best = 0;
+      let bestDistance = Infinity;
+      links.forEach((link, index) => {
+        const box = link.getBoundingClientRect();
+        const distance = Math.abs(
+          box.left + box.width / 2 - barBox.left - indicatorCenter
+        );
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = index;
+        }
+      });
+      return best;
+    };
+
+    // 松手吸附到最近菜单项（示例 setIndicatorPosition + 导航适配）。
+    const snapTo = (index: number) => {
+      const barBox = bar.getBoundingClientRect();
+      const box = links[index].getBoundingClientRect();
+      currentW = box.width;
+      currentX = box.left - barBox.left;
+      indicator.style.setProperty('--indicator-x', `${currentX}px`);
+      indicator.style.setProperty('--indicator-w', `${currentW}px`);
+      setActive(index);
+      const href = links[index].getAttribute('href');
+      if (href && href !== location.pathname) navigate(href);
+    };
+
     const onMove = (event: PointerEvent) => {
-      cancel();
-      const bounds = bar.getBoundingClientRect();
-      setLight(
-        clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100),
-        clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)
-      );
+      if (pointerDown && !dragging && Math.abs(event.clientX - dragStartX) > 4) {
+        dragging = true;
+        dragMoved = true;
+        bar.classList.add('is-dragging');
+        bar.setPointerCapture(event.pointerId);
+      }
+
+      if (dragging) {
+        const limits = dragLimits();
+        currentX = clamp(
+          dragStartPosition + (event.clientX - dragStartX),
+          limits.min,
+          limits.max
+        );
+        indicator.style.setProperty('--indicator-x', `${currentX}px`);
+        setActive(nearestIndex());
+
+        const movementPixels = event.clientX - previousPointerX;
+        const targetStretch = clamp(1 + Math.abs(movementPixels) * 0.035, 1, 1.32);
+        dragStretch += (targetStretch - dragStretch) * 0.58;
+        const squash = 1 - (dragStretch - 1) * 0.48;
+        const skew = clamp(movementPixels * 0.8, -8, 8);
+        indicator.style.setProperty('--drag-scale-x', dragStretch.toFixed(3));
+        indicator.style.setProperty('--drag-scale-y', squash.toFixed(3));
+        indicator.style.setProperty('--drag-skew', `${skew.toFixed(2)}deg`);
+        previousPointerX = event.clientX;
+        dragMoved = true;
+      }
+
+      cancelReset();
+      // 光源以滑块自身 bounds 计算（示例一致）。
+      const bounds = indicator.getBoundingClientRect();
+      if (bounds.width > 0 && bounds.height > 0) {
+        setLight(
+          clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100),
+          clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)
+        );
+      }
     };
+
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      pointerDown = true;
+      dragging = false;
+      dragMoved = false;
+      dragStartX = event.clientX;
+      previousPointerX = event.clientX;
+      const bounds = indicator.getBoundingClientRect();
+      const grabbedIndicator =
+        event.clientX >= bounds.left && event.clientX <= bounds.right;
+      if (grabbedIndicator) {
+        dragStartPosition = currentX;
+      } else {
+        // 未按住滑块时：从指针下方的位置开始拖（示例 getPointerPosition）。
+        const limits = dragLimits();
+        dragStartPosition = clamp(
+          event.clientX - bar.getBoundingClientRect().left - currentW / 2,
+          limits.min,
+          limits.max
+        );
+      }
+      dragStretch = 1;
+      indicator.style.setProperty('--drag-scale-x', '1');
+      indicator.style.setProperty('--drag-scale-y', '1');
+      indicator.style.setProperty('--drag-skew', '0deg');
+      cancelReset();
+    };
+
+    const finishDrag = (event: PointerEvent, suppressIfCancelled: boolean) => {
+      if (!pointerDown) return;
+      if (dragging) snapTo(nearestIndex());
+      indicator.style.setProperty('--drag-scale-x', '1');
+      indicator.style.setProperty('--drag-scale-y', '1');
+      indicator.style.setProperty('--drag-skew', '0deg');
+      dragStretch = 1;
+      pointerDown = false;
+      dragging = false;
+      bar.classList.remove('is-dragging');
+      if (dragMoved && bar.hasPointerCapture(event.pointerId)) {
+        bar.releasePointerCapture(event.pointerId);
+      }
+      suppressClickRef.current = suppressIfCancelled ? true : dragMoved;
+      window.clearTimeout(resetTimer);
+      resetTimer = window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    };
+
+    const onUp = (event: PointerEvent) => finishDrag(event, false);
+    const onCancel = (event: PointerEvent) => finishDrag(event, true);
+
+    // 拖拽后的下一次 click 不应再跳到指针所在的其他链接（document 捕获先于 React）。
+    const onClickCapture = (event: Event) => {
+      if (suppressClickRef.current) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        suppressClickRef.current = false;
+      }
+    };
+
+    const onResize = () => measure();
+
     bar.addEventListener('pointermove', onMove);
-    bar.addEventListener('pointerleave', reset);
-    bar.addEventListener('pointercancel', reset);
+    bar.addEventListener('pointerdown', onDown);
+    bar.addEventListener('pointerup', onUp);
+    bar.addEventListener('pointercancel', onCancel);
+    bar.addEventListener('pointerleave', resetLight);
+    document.addEventListener('click', onClickCapture, true);
+    window.addEventListener('resize', onResize);
+    measure();
     return () => {
-      cancel();
+      cancelReset();
+      window.clearTimeout(resetTimer);
+      bar.classList.remove('is-dragging');
       bar.removeEventListener('pointermove', onMove);
-      bar.removeEventListener('pointerleave', reset);
-      bar.removeEventListener('pointercancel', reset);
+      bar.removeEventListener('pointerdown', onDown);
+      bar.removeEventListener('pointerup', onUp);
+      bar.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('resize', onResize);
+      bar.removeEventListener('pointerleave', resetLight);
+      document.removeEventListener('click', onClickCapture, true);
+      // suppressClickRef 故意不在这里清除：拖拽松手会同步触发路由更新并重挂载本
+      // effect，随后的 click 仍需被吞掉；由 setTimeout 统一复位。
     };
-  }, [me.data]);
+  }, [location.pathname, me.data?.user.id, navigate]);
   if (me.isLoading)
     return (
       <div className="app-loader">
@@ -170,7 +347,20 @@ export function App() {
         </div>
         <nav>
           {links.map(([to, Icon, label]) => (
-            <NavLink key={to} to={to} end={to === '/'}>
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/'}
+              draggable={false}
+              className={() => {
+                const active =
+                  to === '/'
+                    ? location.pathname === '/' ||
+                      location.pathname.startsWith('/week')
+                    : location.pathname === to;
+                return active ? 'active' : '';
+              }}
+            >
               <Icon size={19} />
               <span>{label}</span>
             </NavLink>

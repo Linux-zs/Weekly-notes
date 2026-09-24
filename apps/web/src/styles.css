@@ -154,25 +154,39 @@ html[data-theme="ios-glass"] .theme-option{border-color:rgba(60,60,67,.13);backg
 
 @media(prefers-reduced-transparency:reduce){html[data-theme="ios-glass"] .sidebar,html[data-theme="ios-glass"] .mobile-header,html[data-theme="ios-glass"] .week-hero,html[data-theme="ios-glass"] .report-section,html[data-theme="ios-glass"] .search-panel,html[data-theme="ios-glass"] .search-results,html[data-theme="ios-glass"] .settings-card,html[data-theme="ios-glass"] .login-card,html[data-theme="ios-glass"] .dialog-content,html[data-theme="ios-glass"] .year-weeks,html[data-theme="ios-glass"] .settings-section-nav,html[data-theme="ios-glass"] .week-scroll-summary{background:rgba(255,255,255,.94);-webkit-backdrop-filter:none;backdrop-filter:none}}
 
-/* Liquid glass navigation: the sidebar becomes a horizontally centered glass bar.
-   Sliding highlight + pointer light ported from 纯CSS液态玻璃 demo. */
-html[data-theme] .sidebar,.sidebar{--nav-gap:8px;position:fixed;top:18px;right:auto;bottom:auto;left:50%;width:min(940px,calc(100vw - 32px));padding:var(--nav-gap);display:flex;flex-direction:row;align-items:center;gap:12px;border:1px solid rgba(255,255,255,.75);border-radius:50px;background:rgba(255,255,255,.28);color:var(--ink);box-shadow:inset 1px 1px 0 rgba(255,255,255,.85),0 10px 22px rgba(0,0,0,.14);-webkit-backdrop-filter:blur(10px) saturate(1.08);backdrop-filter:blur(10px) saturate(1.08);transform:translateX(-50%);isolation:isolate;z-index:30}
+/* Liquid glass navigation: strict port of the 纯CSS液态玻璃 demo.
+   Container  = index.html .bottom-nav (kept at top, z-index 30 so dialogs stay above).
+   Capsule    = css/styles.css .box material + index.html .nav-highlight overrides.
+   Behaviour  = index.html inline drag script + js/liquid-glass.js pointer light. */
+html[data-theme] .sidebar,.sidebar{--nav-gap:6px;position:fixed;top:18px;right:auto;bottom:auto;left:50%;width:min(940px,calc(100vw - 32px));padding:var(--nav-gap);display:flex;flex-direction:row;align-items:center;gap:12px;border:1px solid rgba(255,255,255,.75);border-radius:50px;background:rgba(255,255,255,.28);color:var(--ink);box-shadow:inset 1px 1px 0 rgba(255,255,255,.85),0 10px 22px rgba(0,0,0,.14);-webkit-backdrop-filter:blur(10px) saturate(1.08);backdrop-filter:blur(10px) saturate(1.08);transform:translateX(-50%);isolation:isolate;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;z-index:30}
+html[data-theme] .sidebar.is-dragging,.sidebar.is-dragging{cursor:grabbing}
+html[data-theme] .sidebar.is-dragging .nav-highlight,.sidebar.is-dragging .nav-highlight{transition:none;filter:brightness(1.05) saturate(1.16)}
 html[data-theme] .sidebar .brand,.sidebar .brand{flex:0 0 auto;padding:0 0 0 6px;gap:10px}
 html[data-theme] .sidebar nav,.sidebar nav{flex:0 1 auto;margin:0 auto;flex-direction:row;gap:6px}
-html[data-theme] .sidebar nav a,.sidebar nav a{position:relative;z-index:2;justify-content:center;gap:8px;padding:10px 16px;border-radius:999px;color:#667085;transition:color .18s,background-color .18s}
-html[data-theme] .sidebar nav a:hover,.sidebar nav a:hover{background:rgba(255,255,255,.45);color:var(--primary)}
+html[data-theme] .sidebar nav a,.sidebar nav a{position:relative;z-index:2;justify-content:center;gap:8px;padding:10px 16px;border-radius:999px;color:#667085;transition:color .18s,background-color .18s;cursor:pointer}
+html[data-theme] .sidebar nav a:hover,.sidebar nav a:hover{background:transparent;color:var(--primary)}
 html[data-theme] .sidebar nav a.active,.sidebar nav a.active{background:transparent;color:var(--primary);box-shadow:none}
 html[data-theme] .sidebar nav a.active svg,.sidebar nav a.active svg{color:var(--accent)}
+html[data-theme] .sidebar nav a:focus-visible,.sidebar nav a:focus-visible{outline:2px solid var(--primary);outline-offset:-3px;border-radius:40px}
 html[data-theme] .sidebar .sidebar-foot,.sidebar .sidebar-foot{flex:0 0 auto;margin:0 0 0 auto;padding:0 4px 0 10px;border-top:0;gap:8px}
+html[data-theme] .sidebar .sidebar-foot .icon-button,.sidebar .sidebar-foot .icon-button{cursor:pointer}
 html[data-theme] .sidebar .user-row>div,.sidebar .user-row>div{max-width:140px}
 
-/* The single liquid glass capsule that slides to the active menu item. */
-.nav-highlight{--light-x:50%;--light-y:50%;--shadow-x:0px;--shadow-y:4px;position:absolute;z-index:1;top:0;left:0;width:var(--indicator-w,0);height:var(--indicator-h,0);border:1px solid rgba(255,255,255,.95);border-radius:999px;background:rgba(42,44,50,.22);box-shadow:inset 2px -2px 1px -1px rgba(255,255,255,.95),inset -2px 2px 1px -1px rgba(255,255,255,.95),inset 0 0 4px rgba(0,0,0,.32),inset 0 0 10px rgba(255,255,255,.16),var(--shadow-x) var(--shadow-y) 14px rgba(0,0,0,.34);-webkit-backdrop-filter:blur(8px) saturate(1.35);backdrop-filter:blur(8px) saturate(1.35);filter:brightness(.86) saturate(1.18);transform:translate(var(--indicator-x,0),var(--indicator-y,0));transition:transform 360ms cubic-bezier(.22,1,.36,1),width 360ms cubic-bezier(.22,1,.36,1),height 360ms cubic-bezier(.22,1,.36,1);pointer-events:none;will-change:transform,box-shadow}
-.nav-highlight::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;filter:blur(3px);background:radial-gradient(circle at var(--light-x) var(--light-y),rgba(255,255,255,.9) 0%,rgba(255,255,255,.35) 12%,rgba(255,255,255,0) 48%),linear-gradient(45deg,rgba(255,255,255,.8) 0%,transparent 22%,transparent calc(100% - 22%),rgba(255,255,255,.8) 100%)}
+/* The single liquid glass capsule that slides to the active menu item.
+   Position/size come from JS (--indicator-*); drag deformation from --drag-*.
+   The demo disables both .box pseudo elements on the capsule.
+   Note: the demo page wraps the nav in `filter: contrast(3)` which brightens
+   the capsule post-composite; we cannot contrast the whole bar (it would crush
+   brand/avatar colors), so the same brightness is compensated via alpha
+   (rgba(42,44,50,.075) ≈ demo's composited #EAEDF0), RGB kept from the demo. */
+.nav-highlight{--w:var(--indicator-w,0px);--h:var(--indicator-h,0px);--r:9999px;--tr:22%;--light-x:50%;--light-y:50%;--shadow-x:0px;--shadow-y:4px;--drag-scale-x:1;--drag-scale-y:1;--drag-skew:0deg;position:absolute;z-index:1;top:var(--indicator-y,0px);left:0;width:var(--w);height:var(--h);border:1px solid rgba(255,255,255,.95);border-radius:var(--r);background:rgba(42,44,50,.075);box-shadow:inset 2px -2px 1px -1px rgba(255,255,255,.95),inset -2px 2px 1px -1px rgba(255,255,255,.95),inset 0 0 4px rgba(0,0,0,.32),inset 0 0 10px rgba(255,255,255,.16),var(--shadow-x) var(--shadow-y) 14px rgba(0,0,0,.34);-webkit-backdrop-filter:blur(8px) saturate(1.35);backdrop-filter:blur(8px) saturate(1.35);filter:saturate(1.18);transform:translateX(var(--indicator-x,0px)) scaleX(var(--drag-scale-x)) scaleY(var(--drag-scale-y)) skewX(var(--drag-skew));transform-origin:center;transition:transform 360ms cubic-bezier(.22,1,.36,1);pointer-events:none;will-change:transform,box-shadow}
+.nav-highlight::after{display:none!important}
+.nav-highlight::before{display:none}
 
 html[data-theme] .main-content,.main-content{margin-left:0;padding-top:104px}
 @media(max-width:720px){html[data-theme] .sidebar,.sidebar{top:12px;width:calc(100vw - 20px);gap:6px}html[data-theme] .sidebar .brand,.sidebar .brand{padding-left:2px}html[data-theme] .sidebar .brand>div:not(.brand-mark),.sidebar .brand>div:not(.brand-mark){display:none}html[data-theme] .sidebar nav,.sidebar nav{gap:2px}html[data-theme] .sidebar nav a,.sidebar nav a{gap:5px;padding:9px 9px;font-size:12px}html[data-theme] .sidebar .sidebar-foot,.sidebar .sidebar-foot{padding:0 2px 0 4px}html[data-theme] .sidebar .user-row>div,.sidebar .user-row>div{display:none}html[data-theme] .main-content,.main-content{padding-top:86px}}
 @media(max-width:480px){html[data-theme] .sidebar .brand,html[data-theme] .sidebar .user-row,.sidebar .brand,.sidebar .user-row{display:none}html[data-theme] .sidebar nav a,.sidebar nav a{padding:9px 7px;font-size:11px}html[data-theme] .sidebar nav a svg,.sidebar nav a svg{width:16px;height:16px}}
 
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){html[data-theme] .sidebar,.sidebar{background:rgba(255,255,255,.9)}html[data-theme] .nav-highlight,.nav-highlight{background:rgba(60,62,68,.35)}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){html[data-theme] .sidebar,.sidebar{background:rgba(255,255,255,.9)}html[data-theme] .nav-highlight,.nav-highlight{background:rgba(60,62,68,.1)}}
 @media(prefers-reduced-transparency:reduce){html[data-theme] .sidebar,.sidebar{background:rgba(255,255,255,.94);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@media(prefers-reduced-motion:reduce){.nav-highlight{transition-duration:.01ms}}
