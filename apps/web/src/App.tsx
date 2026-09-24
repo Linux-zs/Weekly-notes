@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { BookOpenText, LogOut, Menu, Search, Settings, X } from 'lucide-react';
+import { BookOpenText, LogOut, Search, Settings } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { api, ApiError } from './api';
 import { Loading } from './components';
 import { browserTimezone, formatDate, isoWeekForDate, todayInTimezone, weekRangeForDate } from './lib';
@@ -30,7 +30,8 @@ type Me = {
 
 export function App() {
   const location = useLocation();
-  const [navOpen, setNavOpen] = useState(false);
+  const barRef = useRef<HTMLElement>(null);
+  const highlightRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     document.documentElement.classList.toggle(
       'compact-ui',
@@ -38,6 +39,97 @@ export function App() {
     );
   }, []);
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/api/me'), retry: false });
+  // 液态玻璃导航：将高亮滑块定位到当前激活的菜单项上。
+  useEffect(() => {
+    const bar = barRef.current;
+    const highlight = highlightRef.current;
+    const menu = bar?.querySelector('nav');
+    if (!bar || !highlight || !menu) return;
+    const place = () => {
+      const links = menu.querySelectorAll('a');
+      const active =
+        menu.querySelector('a.active') ??
+        (location.pathname.startsWith('/week') ? links[0] : null);
+      if (!active) {
+        highlight.style.setProperty('--indicator-w', '0px');
+        highlight.style.setProperty('--indicator-h', '0px');
+        return;
+      }
+      const barBox = bar.getBoundingClientRect();
+      const box = active.getBoundingClientRect();
+      highlight.style.setProperty('--indicator-x', `${box.left - barBox.left}px`);
+      highlight.style.setProperty('--indicator-y', `${box.top - barBox.top}px`);
+      highlight.style.setProperty('--indicator-w', `${box.width}px`);
+      highlight.style.setProperty('--indicator-h', `${box.height}px`);
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [me.data, location.pathname]);
+  // 液态玻璃光源：跟随指针移动，移出后平滑回到中心。
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const center = 50;
+    const resetDuration = 320;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(Math.max(value, min), max);
+    let frame = 0;
+    let lightX = center;
+    let lightY = center;
+    const setLight = (x: number, y: number) => {
+      lightX = x;
+      lightY = y;
+      bar.style.setProperty('--light-x', `${x.toFixed(2)}%`);
+      bar.style.setProperty('--light-y', `${y.toFixed(2)}%`);
+      bar.style.setProperty('--shadow-x', `${((center - x) * 0.14).toFixed(2)}px`);
+      bar.style.setProperty('--shadow-y', `${(4 + (center - y) * 0.14).toFixed(2)}px`);
+    };
+    const cancel = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+    };
+    const reset = () => {
+      cancel();
+      if (reduced.matches) {
+        setLight(center, center);
+        return;
+      }
+      const startX = lightX;
+      const startY = lightY;
+      const startedAt = performance.now();
+      const animate = (now: number) => {
+        const progress = clamp((now - startedAt) / resetDuration, 0, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        setLight(
+          startX + (center - startX) * eased,
+          startY + (center - startY) * eased
+        );
+        frame = progress < 1 ? requestAnimationFrame(animate) : 0;
+      };
+      frame = requestAnimationFrame(animate);
+    };
+    const onMove = (event: PointerEvent) => {
+      cancel();
+      const bounds = bar.getBoundingClientRect();
+      setLight(
+        clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100),
+        clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)
+      );
+    };
+    bar.addEventListener('pointermove', onMove);
+    bar.addEventListener('pointerleave', reset);
+    bar.addEventListener('pointercancel', reset);
+    return () => {
+      cancel();
+      bar.removeEventListener('pointermove', onMove);
+      bar.removeEventListener('pointerleave', reset);
+      bar.removeEventListener('pointercancel', reset);
+    };
+  }, [me.data]);
   if (me.isLoading)
     return (
       <div className="app-loader">
@@ -67,28 +159,18 @@ export function App() {
   ] as const;
   return (
     <div className="app-shell">
-      <header className="mobile-header">
-        <button className="icon-button" onClick={() => setNavOpen(true)} aria-label="打开导航">
-          <Menu />
-        </button>
-        <span className="mobile-brand">周报工作台</span>
-        <Avatar user={user} />
-      </header>
-      {navOpen && <button className="nav-scrim" aria-label="关闭导航" onClick={() => setNavOpen(false)} />}
-      <aside className={`sidebar ${navOpen ? 'sidebar-open' : ''}`}>
+      <aside className="sidebar" ref={barRef}>
+        <span className="nav-highlight" ref={highlightRef} aria-hidden="true" />
         <div className="brand">
           <div className="brand-mark">报</div>
           <div>
             <strong>周报工作台</strong>
             <span>Weekly briefing</span>
           </div>
-          <button className="icon-button nav-close" aria-label="关闭导航" onClick={() => setNavOpen(false)}>
-            <X />
-          </button>
         </div>
         <nav>
           {links.map(([to, Icon, label]) => (
-            <NavLink key={to} to={to} end={to === '/'} onClick={() => setNavOpen(false)}>
+            <NavLink key={to} to={to} end={to === '/'}>
               <Icon size={19} />
               <span>{label}</span>
             </NavLink>
