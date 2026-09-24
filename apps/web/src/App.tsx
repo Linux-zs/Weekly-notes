@@ -338,13 +338,6 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar" ref={barRef}>
         <span className="nav-highlight" ref={highlightRef} aria-hidden="true" />
-        <div className="brand">
-          <div className="brand-mark">报</div>
-          <div>
-            <strong>周报工作台</strong>
-            <span>Weekly briefing</span>
-          </div>
-        </div>
         <nav>
           {links.map(([to, Icon, label]) => (
             <NavLink
