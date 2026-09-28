@@ -3,6 +3,7 @@ import { BookOpenText, LogOut, Search, Settings } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { api, ApiError } from './api';
+import { createGlassRefractionMap } from './glass-refraction';
 import { Loading } from './components';
 import { browserTimezone, formatDate, isoWeekForDate, todayInTimezone, weekRangeForDate } from './lib';
 
@@ -33,6 +34,8 @@ export function App() {
   const navigate = useNavigate();
   const barRef = useRef<HTMLElement>(null);
   const highlightRef = useRef<HTMLSpanElement>(null);
+  const refractionMapRef = useRef<SVGFEImageElement>(null);
+  const lensContentRef = useRef<HTMLSpanElement>(null);
   // 拖拽结束后的下一次 click 需要被吞掉（跨 effect 重挂载保持）。
   const suppressClickRef = useRef(false);
   useEffect(() => {
@@ -42,12 +45,11 @@ export function App() {
     );
   }, []);
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/api/me'), retry: false });
-  // 液态玻璃导航：严格移植“纯CSS液态玻璃”示例脚本
-  // （拖拽吸附、液滴拉伸/收缩/回弹、指针光源与阴影、光源 320ms 回中）。
+  // 薄玻璃导航：拖拽吸附、液滴拉伸/收缩/回弹，柔和表面光源 320ms 回中。
   useEffect(() => {
     const bar = barRef.current;
     const indicator = highlightRef.current;
-    const menu = bar?.querySelector('nav');
+    const menu = bar?.querySelector<HTMLElement>(':scope > nav');
     if (!bar || !indicator || !menu) return;
     const links: HTMLAnchorElement[] = Array.from(menu.querySelectorAll('a'));
     if (links.length === 0) return;
@@ -67,20 +69,51 @@ export function App() {
     let dragStartX = 0;
     let dragStartPosition = 0;
     let previousPointerX = 0;
+    let previousPointerTime = 0;
     let dragStretch = 1;
     let currentX = 0;
     let currentW = 0;
+    let lensFrame = 0;
+    let lensUntil = 0;
+    const lensContent = lensContentRef.current;
+    // A visual-only copy supplies the lens pixels; original links retain all input and semantics.
+    const artwork = menu.cloneNode(true) as HTMLElement;
+    artwork.removeAttribute('class');
+    artwork.className = 'nav-lens-artwork';
+    artwork.setAttribute('aria-hidden', 'true');
+    artwork.inert = true;
+    artwork.querySelectorAll('a').forEach((link) => {
+      link.removeAttribute('href');
+      link.removeAttribute('aria-current');
+      link.tabIndex = -1;
+    });
+    lensContent?.replaceChildren(artwork);
+    const syncLens = () => {
+      lensFrame = 0;
+      const lens = indicator.getBoundingClientRect();
+      const source = menu.getBoundingClientRect();
+      const left = lens.left - source.left;
+      menu.style.setProperty('--lens-left', `${left}px`);
+      menu.style.setProperty('--lens-right', `${left + lens.width}px`);
+      artwork.style.width = `${source.width}px`;
+      artwork.style.left = `${-left}px`;
+      artwork.style.top = `${source.top - lens.top}px`;
+      if (performance.now() < lensUntil) lensFrame = requestAnimationFrame(syncLens);
+    };
+    const trackLens = () => {
+      lensUntil = performance.now() + 450;
+      if (!lensFrame) lensFrame = requestAnimationFrame(syncLens);
+    };
 
     const setLight = (x: number, y: number) => {
       lightX = x;
       lightY = y;
       indicator.style.setProperty('--light-x', `${x.toFixed(2)}%`);
       indicator.style.setProperty('--light-y', `${y.toFixed(2)}%`);
-      indicator.style.setProperty('--shadow-x', `${((center - x) * 0.14).toFixed(2)}px`);
-      indicator.style.setProperty(
-        '--shadow-y',
-        `${(4 + (center - y) * 0.14).toFixed(2)}px`
-      );
+      indicator.style.setProperty('--shade-x', `${((50 - x) * 0.055).toFixed(2)}px`);
+      indicator.style.setProperty('--shade-y', `${(2 + (50 - y) * 0.045).toFixed(2)}px`);
+      indicator.style.setProperty('--rim-x', `${((x - 50) * 0.025).toFixed(2)}px`);
+      indicator.style.setProperty('--rim-y', `${((y - 50) * 0.025).toFixed(2)}px`);
     };
 
     const cancelReset = () => {
@@ -124,9 +157,26 @@ export function App() {
         link.classList.toggle('active', active);
         if (active) link.setAttribute('aria-current', 'page');
         else link.removeAttribute('aria-current');
+        artwork.children[current]?.classList.toggle('active', active);
       });
     };
 
+    let lensSize = '';
+    const updateLens = (width: number, height: number) => {
+      const size = `${Math.ceil(width)}:${Math.ceil(height)}`;
+      if (size === lensSize) return;
+      const map = createGlassRefractionMap(width, height);
+      if (map && refractionMapRef.current) {
+        const image = refractionMapRef.current;
+        image.setAttribute('width', `${width}`);
+        image.setAttribute('height', `${height}`);
+        image.parentElement?.setAttribute('width', `${width}`);
+        image.parentElement?.setAttribute('height', `${height}`);
+        image.setAttribute('href', map);
+        indicator.classList.add('has-refraction');
+        lensSize = size;
+      }
+    };
     const measure = () => {
       const index = activeIndex();
       if (index < 0) return;
@@ -138,6 +188,8 @@ export function App() {
       indicator.style.setProperty('--indicator-y', `${box.top - barBox.top}px`);
       indicator.style.setProperty('--indicator-w', `${currentW}px`);
       indicator.style.setProperty('--indicator-h', `${box.height}px`);
+      updateLens(currentW, box.height);
+      trackLens();
     };
 
     const dragLimits = () => {
@@ -176,12 +228,14 @@ export function App() {
       currentX = box.left - barBox.left;
       indicator.style.setProperty('--indicator-x', `${currentX}px`);
       indicator.style.setProperty('--indicator-w', `${currentW}px`);
+      updateLens(currentW, box.height);
       setActive(index);
       const href = links[index].getAttribute('href');
       if (href && href !== location.pathname) navigate(href);
     };
 
     const onMove = (event: PointerEvent) => {
+      trackLens();
       if (pointerDown && !dragging && Math.abs(event.clientX - dragStartX) > 4) {
         dragging = true;
         dragMoved = true;
@@ -200,14 +254,17 @@ export function App() {
         setActive(nearestIndex());
 
         const movementPixels = event.clientX - previousPointerX;
-        const targetStretch = clamp(1 + Math.abs(movementPixels) * 0.035, 1, 1.32);
-        dragStretch += (targetStretch - dragStretch) * 0.58;
-        const squash = 1 - (dragStretch - 1) * 0.48;
-        const skew = clamp(movementPixels * 0.8, -8, 8);
+        const elapsed = Math.max(4, event.timeStamp - previousPointerTime);
+        const velocity = movementPixels / elapsed;
+        const targetStretch = reduceMotion.matches ? 1 : clamp(1 + Math.abs(velocity) * 0.28, 1, 1.4);
+        dragStretch += (targetStretch - dragStretch) * (1 - Math.exp(-elapsed / 24));
+        const squash = 1 - (dragStretch - 1) * 0.75;
+        const skew = reduceMotion.matches ? 0 : clamp(velocity * 5, -8, 8);
         indicator.style.setProperty('--drag-scale-x', dragStretch.toFixed(3));
         indicator.style.setProperty('--drag-scale-y', squash.toFixed(3));
         indicator.style.setProperty('--drag-skew', `${skew.toFixed(2)}deg`);
         previousPointerX = event.clientX;
+        previousPointerTime = event.timeStamp;
         dragMoved = true;
       }
 
@@ -229,6 +286,7 @@ export function App() {
       dragMoved = false;
       dragStartX = event.clientX;
       previousPointerX = event.clientX;
+      previousPointerTime = event.timeStamp;
       const bounds = indicator.getBoundingClientRect();
       const grabbedIndicator =
         event.clientX >= bounds.left && event.clientX <= bounds.right;
@@ -283,6 +341,24 @@ export function App() {
     };
 
     const onResize = () => measure();
+    let ambientLight = false;
+    const onAmbientMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch' || bar.contains(event.target as Node)) return;
+      const bounds = indicator.getBoundingClientRect();
+      const nearby = event.clientX > bounds.left - 120 && event.clientX < bounds.right + 120 &&
+        event.clientY > bounds.top - 120 && event.clientY < bounds.bottom + 120;
+      if (nearby) {
+        ambientLight = true;
+        cancelReset();
+        setLight(
+          clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100),
+          clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)
+        );
+      } else if (ambientLight) {
+        ambientLight = false;
+        resetLight();
+      }
+    };
 
     bar.addEventListener('pointermove', onMove);
     bar.addEventListener('pointerdown', onDown);
@@ -290,9 +366,17 @@ export function App() {
     bar.addEventListener('pointercancel', onCancel);
     bar.addEventListener('pointerleave', resetLight);
     document.addEventListener('click', onClickCapture, true);
+    document.addEventListener('pointermove', onAmbientMove, { passive: true });
     window.addEventListener('resize', onResize);
     measure();
+    if (lensContent) {
+      menu.classList.add('has-lens-artwork');
+      trackLens();
+    }
     return () => {
+      cancelAnimationFrame(lensFrame);
+      menu.classList.remove('has-lens-artwork');
+      lensContent?.replaceChildren();
       cancelReset();
       window.clearTimeout(resetTimer);
       bar.classList.remove('is-dragging');
@@ -303,6 +387,7 @@ export function App() {
       window.removeEventListener('resize', onResize);
       bar.removeEventListener('pointerleave', resetLight);
       document.removeEventListener('click', onClickCapture, true);
+      document.removeEventListener('pointermove', onAmbientMove);
       // suppressClickRef 故意不在这里清除：拖拽松手会同步触发路由更新并重挂载本
       // effect，随后的 click 仍需被吞掉；由 setTimeout 统一复位。
     };
@@ -336,8 +421,18 @@ export function App() {
   ] as const;
   return (
     <div className="app-shell">
+      <svg className="glass-filter-defs" aria-hidden="true" width="0" height="0">
+        <defs>
+          <filter id="nav-glass-refraction" filterUnits="userSpaceOnUse" x="0" y="0" width="1" height="1" colorInterpolationFilters="sRGB">
+            <feImage ref={refractionMapRef} x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="lens" />
+            <feDisplacementMap in="SourceGraphic" in2="lens" scale="32" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+        </defs>
+      </svg>
       <aside className="sidebar" ref={barRef}>
-        <span className="nav-highlight" ref={highlightRef} aria-hidden="true" />
+        <span className="nav-highlight" ref={highlightRef} aria-hidden="true">
+          <span className="nav-lens-content" ref={lensContentRef} />
+        </span>
         <nav>
           {links.map(([to, Icon, label]) => (
             <NavLink

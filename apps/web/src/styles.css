@@ -153,11 +153,8 @@ html[data-theme="ios-glass"] .theme-option{border-color:rgba(60,60,67,.13);backg
 
 @media(prefers-reduced-transparency:reduce){html[data-theme="ios-glass"] .sidebar,html[data-theme="ios-glass"] .mobile-header,html[data-theme="ios-glass"] .week-hero,html[data-theme="ios-glass"] .report-section,html[data-theme="ios-glass"] .search-panel,html[data-theme="ios-glass"] .search-results,html[data-theme="ios-glass"] .settings-card,html[data-theme="ios-glass"] .login-card,html[data-theme="ios-glass"] .dialog-content,html[data-theme="ios-glass"] .year-weeks,html[data-theme="ios-glass"] .settings-section-nav,html[data-theme="ios-glass"] .week-scroll-summary{background:rgba(255,255,255,.94);-webkit-backdrop-filter:none;backdrop-filter:none}}
 
-/* Liquid glass navigation: strict port of the 纯CSS液态玻璃 demo.
-   Container  = index.html .bottom-nav (kept at top, z-index 30 so dialogs stay above).
-   Capsule    = css/styles.css .box material + index.html .nav-highlight overrides.
-   Behaviour  = index.html inline drag script + js/liquid-glass.js pointer light. */
-html[data-theme] .sidebar,.sidebar{--nav-gap:6px;position:fixed;top:auto;right:auto;bottom:24px;left:50%;width:max-content;max-width:calc(100vw - 24px);padding:var(--nav-gap);display:flex;flex-direction:row;align-items:center;gap:12px;border:1px solid rgba(255,255,255,.75);border-radius:50px;background:rgba(255,255,255,.28);color:var(--ink);box-shadow:inset 1px 1px 0 rgba(255,255,255,.85),0 10px 22px rgba(0,0,0,.14);-webkit-backdrop-filter:blur(10px) saturate(1.08);backdrop-filter:blur(10px) saturate(1.08);transform:translateX(-50%);isolation:isolate;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;z-index:30}
+/* Front-facing thin glass navigation; sliding and drag deformation use the existing indicator variables. */
+html[data-theme] .sidebar,.sidebar{--nav-gap:6px;position:fixed;top:auto;right:auto;bottom:24px;left:50%;width:max-content;max-width:calc(100vw - 24px);padding:var(--nav-gap);display:flex;flex-direction:row;align-items:center;gap:12px;border:1px solid rgba(255,255,255,.28);border-radius:50px;background:rgba(255,255,255,.22);color:var(--ink);box-shadow:0 4px 14px rgba(28,45,66,.09);-webkit-backdrop-filter:blur(10px) saturate(1.08);backdrop-filter:blur(10px) saturate(1.08);transform:translateX(-50%);isolation:isolate;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;z-index:30}
 html[data-theme] .sidebar.is-dragging,.sidebar.is-dragging{cursor:grabbing}
 html[data-theme] .sidebar.is-dragging .nav-highlight,.sidebar.is-dragging .nav-highlight{transition:none;filter:brightness(1.05) saturate(1.16)}
 html[data-theme] .sidebar .sidebar-foot,.sidebar .sidebar-foot{flex:0 0 auto;margin:0 0 0 auto;padding:0 4px 0 10px;border-top:0;gap:8px}
@@ -170,14 +167,8 @@ html[data-theme] .sidebar nav a.active,.sidebar nav a.active{background:transpar
 html[data-theme] .sidebar nav a.active svg,.sidebar nav a.active svg{color:var(--accent)}
 html[data-theme] .sidebar nav a:focus-visible,.sidebar nav a:focus-visible{outline:2px solid var(--primary);outline-offset:-3px;border-radius:40px}
 
-/* The single liquid glass capsule that slides to the active menu item.
-   Position/size come from JS (--indicator-*); drag deformation from --drag-*.
-   The demo disables both .box pseudo elements on the capsule.
-   Note: the demo page wraps the nav in `filter: contrast(3)` which brightens
-   the capsule post-composite; we cannot contrast the whole bar (it would crush
-   brand/avatar colors), so the same brightness is compensated via alpha
-   (rgba(42,44,50,.075) ≈ demo's composited #EAEDF0), RGB kept from the demo. */
-.nav-highlight{--w:var(--indicator-w,0px);--h:var(--indicator-h,0px);--r:9999px;--tr:22%;--light-x:50%;--light-y:50%;--shadow-x:0px;--shadow-y:4px;--drag-scale-x:1;--drag-scale-y:1;--drag-skew:0deg;position:absolute;z-index:1;top:var(--indicator-y,0px);left:0;width:var(--w);height:var(--h);border:1px solid rgba(255,255,255,.95);border-radius:var(--r);background:rgba(42,44,50,.075);box-shadow:inset 2px -2px 1px -1px rgba(255,255,255,.95),inset -2px 2px 1px -1px rgba(255,255,255,.95),inset 0 0 4px rgba(0,0,0,.32),inset 0 0 10px rgba(255,255,255,.16),var(--shadow-x) var(--shadow-y) 14px rgba(0,0,0,.34);-webkit-backdrop-filter:blur(8px) saturate(1.35);backdrop-filter:blur(8px) saturate(1.35);filter:saturate(1.18);transform:translateX(var(--indicator-x,0px)) scaleX(var(--drag-scale-x)) scaleY(var(--drag-scale-y)) skewX(var(--drag-skew));transform-origin:center;transition:transform 360ms cubic-bezier(.22,1,.36,1);pointer-events:none;will-change:transform,box-shadow}
+/* A shallow glass lens without bevels or a dark inset rim. Pointer light moves a soft surface reflection. */
+.nav-highlight{--w:var(--indicator-w,0px);--h:var(--indicator-h,0px);--r:9999px;--light-x:50%;--light-y:50%;--drag-scale-x:1;--drag-scale-y:1;--drag-skew:0deg;position:absolute;z-index:1;top:var(--indicator-y,0px);left:0;width:var(--w);height:var(--h);border:1px solid rgba(255,255,255,.3);border-radius:var(--r);background:radial-gradient(ellipse at var(--light-x) var(--light-y),rgba(255,255,255,.32),transparent 72%),rgba(255,255,255,.16);box-shadow:0 2px 7px rgba(28,45,66,.12);-webkit-backdrop-filter:blur(8px) saturate(1.35);backdrop-filter:blur(8px) saturate(1.35);filter:saturate(1.18);transform:translateX(var(--indicator-x,0px)) scaleX(var(--drag-scale-x)) scaleY(var(--drag-scale-y)) skewX(var(--drag-skew));transform-origin:center;transition:transform 360ms cubic-bezier(.22,1,.36,1);pointer-events:none;will-change:transform}
 .nav-highlight::after{display:none!important}
 .nav-highlight::before{display:none}
 
@@ -191,7 +182,36 @@ html[data-theme] .main-content,.main-content{margin-left:0;padding-top:0;padding
 
 /* iOS liquid-glass material for the floating capsule bar. This block must stay
    after the generic liquid-glass section above: equal specificity, later wins. */
-html[data-theme="ios-glass"] .sidebar,html[data-theme="ios-glass"] .week-scroll-summary{border-color:rgba(255,255,255,.88);background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,.32));box-shadow:0 16px 36px rgba(28,64,120,.2),inset 0 1px 0 rgba(255,255,255,.98),inset 0 -1px 0 rgba(255,255,255,.45);-webkit-backdrop-filter:saturate(190%) blur(26px);backdrop-filter:saturate(190%) blur(26px)}
-html[data-theme="ios-glass"] .sidebar nav a:hover{background:rgba(255,255,255,.55);color:var(--primary)}
+html[data-theme="ios-glass"] .sidebar,html[data-theme="ios-glass"] .week-scroll-summary{border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.3);box-shadow:0 5px 18px rgba(28,64,120,.1);-webkit-backdrop-filter:saturate(160%) blur(18px);backdrop-filter:saturate(160%) blur(18px)}
+html[data-theme="ios-glass"] .sidebar nav a:hover{background:rgba(255,255,255,.12);color:var(--primary)}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){html[data-theme="ios-glass"] .sidebar,html[data-theme="ios-glass"] .week-scroll-summary{background:rgba(255,255,255,.92)}}
 @media(prefers-reduced-transparency:reduce){html[data-theme="ios-glass"] .sidebar,html[data-theme="ios-glass"] .week-scroll-summary{background:rgba(255,255,255,.94);-webkit-backdrop-filter:none;backdrop-filter:none}}
+
+/* The lens sits above the menu artwork so the actual glyphs are refracted. */
+.glass-filter-defs{position:absolute;pointer-events:none;overflow:hidden}
+html[data-theme] .sidebar nav a.active,.sidebar nav a.active{color:#25282c;font-weight:800}
+html[data-theme] .sidebar .nav-highlight,.sidebar .nav-highlight{z-index:3;border-color:rgba(55,59,64,.28);background:radial-gradient(ellipse at var(--light-x) var(--light-y),rgba(255,255,255,.3),transparent 70%),rgba(65,69,75,.16);box-shadow:0 2px 6px rgba(28,45,66,.16),0 0 0 1px rgba(255,255,255,.2);filter:none;-webkit-backdrop-filter:saturate(1.2);backdrop-filter:saturate(1.2)}
+html[data-theme] .sidebar .nav-highlight.has-refraction,.sidebar .nav-highlight.has-refraction{-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}
+
+/* Blur on a sibling surface avoids a transparent ancestor backdrop root. */
+html[data-theme] .sidebar,.sidebar{-webkit-backdrop-filter:none;backdrop-filter:none}
+.sidebar::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;-webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2)}
+@media(prefers-reduced-transparency:reduce){.sidebar::before{-webkit-backdrop-filter:none;backdrop-filter:none}}
+
+html[data-theme] .sidebar,.sidebar{isolation:auto}
+
+html[data-theme] .sidebar nav a.active svg,.sidebar nav a.active svg{color:#25282c}
+
+/* Refract a masked copy instead of compositing displaced glyphs over the originals. */
+.sidebar > nav.has-lens-artwork{mask-image:linear-gradient(to right,#000 var(--lens-left),transparent var(--lens-left),transparent var(--lens-right),#000 var(--lens-right))}
+html[data-theme] .sidebar .nav-highlight,.sidebar .nav-highlight{overflow:hidden}
+.nav-lens-content{position:absolute;inset:0;filter:url(#nav-glass-refraction);pointer-events:none}
+html[data-theme] .sidebar nav.nav-lens-artwork,.sidebar nav.nav-lens-artwork{position:absolute;display:flex;flex:none;margin:0;justify-content:flex-start;pointer-events:none}
+html[data-theme] .sidebar nav.nav-lens-artwork a,.sidebar nav.nav-lens-artwork a{flex-shrink:0}
+/* Clear neutral glass: directional light, shallow edge refraction, no central zoom. */
+html[data-theme] .sidebar,html[data-theme] .week-scroll-summary{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.22);box-shadow:0 4px 16px rgba(30,34,40,.08)}
+html[data-theme] .week-scroll-summary{-webkit-backdrop-filter:blur(5px) saturate(1.08);backdrop-filter:blur(5px) saturate(1.08)}
+html[data-theme] .sidebar::before{-webkit-backdrop-filter:blur(5px) saturate(1.08);backdrop-filter:blur(5px) saturate(1.08)}
+html[data-theme] .sidebar .nav-highlight{--shade-x:0px;--shade-y:2px;--rim-x:0px;--rim-y:-1px;border-color:rgba(65,68,72,.2);background:radial-gradient(ellipse 85% 110% at var(--light-x) var(--light-y),rgba(255,255,255,.5),rgba(255,255,255,.04) 60%,transparent 80%),rgba(60,64,70,.12);box-shadow:var(--shade-x) var(--shade-y) 9px rgba(22,26,32,.2),inset var(--rim-x) var(--rim-y) 1px rgba(255,255,255,.65)}
+html[data-theme] .sidebar .nav-highlight::before{content:'';display:block;position:absolute;inset:0;z-index:2;border-radius:inherit;pointer-events:none;background:radial-gradient(ellipse 48% 85% at var(--light-x) var(--light-y),rgba(255,255,255,.28),transparent 75%)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){html[data-theme] .sidebar,html[data-theme] .week-scroll-summary{background:rgba(245,246,247,.85)}}
