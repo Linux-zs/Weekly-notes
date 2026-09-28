@@ -191,8 +191,8 @@ export function App() {
       if (index < 0) return;
       const barBox = bar.getBoundingClientRect();
       const box = links[index].getBoundingClientRect();
-      currentW = box.width;
-      currentX = box.left - barBox.left;
+      currentW = box.width + 8;
+      currentX = box.left - barBox.left - 4;
       indicator.style.setProperty('--indicator-x', `${currentX}px`);
       indicator.style.setProperty('--indicator-y', `${box.top - barBox.top}px`);
       indicator.style.setProperty('--indicator-w', `${currentW}px`);
@@ -206,8 +206,8 @@ export function App() {
       const first = links[0].getBoundingClientRect();
       const last = links[links.length - 1].getBoundingClientRect();
       return {
-        min: first.left - barBox.left,
-        max: last.right - barBox.left - currentW
+        min: first.left - barBox.left - 4,
+        max: last.right - barBox.left - currentW + 4
       };
     };
 
@@ -233,8 +233,8 @@ export function App() {
     const snapTo = (index: number) => {
       const barBox = bar.getBoundingClientRect();
       const box = links[index].getBoundingClientRect();
-      currentW = box.width;
-      currentX = box.left - barBox.left;
+      currentW = box.width + 8;
+      currentX = box.left - barBox.left - 4;
       indicator.style.setProperty('--indicator-x', `${currentX}px`);
       indicator.style.setProperty('--indicator-w', `${currentW}px`);
       updateLens(currentW, box.height);
