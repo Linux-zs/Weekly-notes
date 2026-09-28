@@ -61,7 +61,6 @@ import {
   formatDate,
   hasMarkdownImage,
   isoWeekForDate,
-  Markdown,
   attachmentImageWidth,
   sectionHints,
   sectionLabels,
@@ -1885,7 +1884,6 @@ function ReportItemRow({
   const [occurredOn, setOccurredOn] = useState(restoredDraft.occurredOn ?? '');
   const [tagIds, setTagIds] = useState(restoredDraft.tagIds);
   const [inlineEditing, setInlineEditing] = useState(false);
-  const [detailEditing, setDetailEditing] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [categoryCreatorOpen, setCategoryCreatorOpen] = useState(false);
@@ -2127,7 +2125,6 @@ function ReportItemRow({
   });
   const openDetails = () => {
     setInlineEditing(false);
-    setDetailEditing(false);
     onOpenDetails();
   };
   const retrySave = () => {
@@ -2136,10 +2133,6 @@ function ReportItemRow({
     enqueueLatestDraft();
   };
   const displayContent = summarizeMarkdown(content) || (content.trim() ? '点击打开详情' : '点击填写内容');
-  const detailProject = projects.find((project) => project.id === (projectId || null));
-  const detailCategory = categories.find((category) => category.id === (categoryId || null));
-  const knownTags = qc.getQueryData<{ tags: ReportItem['tags'] }>(['tags'])?.tags ?? item.tags;
-  const detailTags = knownTags.filter((tag) => tagIds.includes(tag.id));
 
   return (
     <article
@@ -2306,17 +2299,12 @@ function ReportItemRow({
         open={detailsOpen}
         onOpenChange={(open) => {
           if (!open) {
-            setDetailEditing(false);
             setFullscreenImage(null);
             onCloseDetails();
           }
         }}
         title={`周报详情 · 第 ${sequence} 条`}
-        description={
-          detailEditing
-            ? '直接修改 Markdown；图片会插入当前光标位置。'
-            : '完整预览周报内容，点击编辑按钮可原地修改 Markdown。'
-        }
+        description="直接修改 Markdown；图片会插入当前光标位置。"
         wide
       >
         <div className="report-detail-editor markdown-only-editor">
@@ -2339,8 +2327,7 @@ function ReportItemRow({
               )}
             </div>
             <div className="detail-edit-actions">
-              {detailEditing && (
-                <div className="detail-tools">
+              <div className="detail-tools">
                   <input
                     ref={fileInputRef}
                     className="visually-hidden"
@@ -2370,162 +2357,37 @@ function ReportItemRow({
                   <span className="paste-image-hint">也可在正文中直接粘贴截图</span>
                   {upload.error && <strong>{upload.error.message}</strong>}
                 </div>
-              )}
-              <button
-                className={`button ${detailEditing ? 'secondary' : ''}`}
-                onClick={() => setDetailEditing((value) => !value)}
-              >
-                <Pencil size={15} />
-                {detailEditing ? '完成编辑' : '编辑 Markdown'}
-              </button>
             </div>
           </div>
-          {detailEditing && (
-            <div className="report-item-fields">
-              <label>
-                所属项目
-                <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-                  <option value="">未归属项目</option>
-                  {projects
-                    .filter((project) => !project.archivedAt || project.id === projectId)
-                    .map((project) => (
-                      <option value={project.id} key={project.id} disabled={Boolean(project.archivedAt)}>
-                        {project.name}
-                        {project.archivedAt ? '（已停用）' : ''}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label>
-                条目分类
-                <select
-                  value={categoryId}
-                  onChange={(event) => {
-                    if (event.target.value === '__create__') setCategoryCreatorOpen(true);
-                    else setCategoryId(event.target.value);
-                  }}
-                >
-                  <option value="">未分类</option>
-                  {categories
-                    .filter((category) => !category.archivedAt || category.id === categoryId)
-                    .map((category) => (
-                      <option value={category.id} key={category.id}>
-                        {category.name}
-                        {category.archivedAt ? '（已停用）' : ''}
-                      </option>
-                    ))}
-                  <option value="__create__">＋ 新建分类…</option>
-                </select>
-              </label>
-              <label>
-                内容类型
-                <select
-                  value={itemType}
-                  onChange={(event) => setItemType(event.target.value as ReportItemType)}
-                >
-                  {Object.entries(sectionLabels).map(([value, label]) => (
-                    <option value={value} key={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                发生日期
+            <div className="report-item-fields detail-meta-row">
+              <label className="detail-meta-field">
+                备注
                 <input
-                  type="date"
-                  value={occurredOn}
-                  onChange={(event) => setOccurredOn(event.target.value)}
+                  value={itemMeta.note}
+                  onChange={(event) => setItemMeta((value) => ({ ...value, note: event.target.value }))}
+                  placeholder="添加备注"
+                  aria-label="备注"
                 />
               </label>
-              <div className="report-tags-field">
-                <span>标签</span>
-                <TagField value={tagIds} onChange={setTagIds} />
-              </div>
             </div>
-          )}
-          {detailEditing ? (
-            <div className="markdown-editor-pane markdown-editor-single">
-              <span>MARKDOWN</span>
-              <textarea
-                ref={textareaRef}
-                autoFocus
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                onPaste={(event) => {
-                  const file = clipboardImage(event.clipboardData);
-                  if (!file) return;
-                  event.preventDefault();
-                  upload.mutate({ file, insertAt: event.currentTarget.selectionStart });
-                }}
-                rows={16}
-                placeholder="写下一件值得回看的事……"
-                aria-label="Markdown 内容"
-              />
-            </div>
-          ) : (
-            <>
-              <dl className="detail-read-fields">
-                <div>
-                  <dt>栏目</dt>
-                  <dd>{sectionLabels[itemType]}</dd>
-                </div>
-                <div>
-                  <dt>项目</dt>
-                  <dd>
-                    {detailProject?.name ?? '未归属项目'}
-                    {detailProject?.archivedAt ? '（已停用）' : ''}
-                  </dd>
-                </div>
-                <div>
-                  <dt>分类</dt>
-                  <dd>
-                    {detailCategory?.name ?? '未分类'}
-                    {detailCategory?.archivedAt ? '（已停用）' : ''}
-                  </dd>
-                </div>
-                <div>
-                  <dt>进度</dt>
-                  <dd className={`detail-progress progress-${itemMeta.progress}`}>
-                    {progressLabels[itemMeta.progress]}
-                  </dd>
-                </div>
-                <div>
-                  <dt>发生日期</dt>
-                  <dd>{occurredOn ? formatDate(occurredOn) : '未填写'}</dd>
-                </div>
-                <div className="detail-read-tags">
-                  <dt>标签</dt>
-                  <dd>
-                    {detailTags.length
-                      ? detailTags.map((tag) => (
-                          <span className="detail-read-tag" key={tag.id}>
-                            <i style={{ background: tag.color }} />
-                            {tag.name}
-                          </span>
-                        ))
-                      : '无'}
-                  </dd>
-                </div>
-                <div className="detail-read-note">
-                  <dt>备注</dt>
-                  <dd>{itemMeta.note || '无'}</dd>
-                </div>
-              </dl>
-              <div
-                className="detail-preview detail-preview-only"
-                onDoubleClick={(event) => {
-                  if (!(event.target instanceof HTMLImageElement)) return;
-                  setFullscreenImage({
-                    src: event.target.currentSrc || event.target.src,
-                    alt: event.target.alt || '周报图片'
-                  });
-                }}
-              >
-                <Markdown content={content} sizeImages />
-              </div>
-            </>
-          )}
+          <div className="markdown-editor-pane markdown-editor-single">
+            <span>MARKDOWN</span>
+            <textarea
+              ref={textareaRef}
+              autoFocus
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              onPaste={(event) => {
+                const file = clipboardImage(event.clipboardData);
+                if (!file) return;
+                event.preventDefault();
+                upload.mutate({ file, insertAt: event.currentTarget.selectionStart });
+              }}
+              rows={16}
+              placeholder="写下一件值得回看的事……"
+              aria-label="Markdown 内容"
+            />
+          </div>
           <div className="attachment-panel">
             <div className="attachment-panel-heading">
               <strong>附件</strong>
@@ -2579,11 +2441,58 @@ function ReportItemRow({
                 })}
               </div>
             ) : (
-              <small>暂无附件。进入编辑模式可以添加图片。</small>
+              <small>暂无附件。点击「添加图片」，或直接粘贴截图。</small>
             )}
             {removeAttachment.error && (
               <div className="form-error">删除附件失败：{removeAttachment.error.message}</div>
             )}
+          </div>
+          <div className="report-item-fields detail-meta-footer">
+            <label className="detail-meta-field">
+              所属项目
+              <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+                <option value="">未归属项目</option>
+                {projects
+                  .filter((project) => !project.archivedAt || project.id === projectId)
+                  .map((project) => (
+                    <option value={project.id} key={project.id} disabled={Boolean(project.archivedAt)}>
+                      {project.name}
+                      {project.archivedAt ? '（已停用）' : ''}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="detail-meta-field">
+              条目分类
+              <select
+                value={categoryId}
+                onChange={(event) => {
+                  if (event.target.value === '__create__') setCategoryCreatorOpen(true);
+                  else setCategoryId(event.target.value);
+                }}
+              >
+                <option value="">未分类</option>
+                {categories
+                  .filter((category) => !category.archivedAt || category.id === categoryId)
+                  .map((category) => (
+                    <option value={category.id} key={category.id}>
+                      {category.name}
+                      {category.archivedAt ? '（已停用）' : ''}
+                    </option>
+                  ))}
+                <option value="__create__">＋ 新建分类…</option>
+              </select>
+            </label>
+            <div className="detail-meta-field">
+              <span>标签</span>
+              <TagField value={tagIds} onChange={setTagIds} />
+            </div>
+            <div className="detail-meta-field">
+              <span>进度</span>
+              <span className={`detail-meta-value detail-progress progress-${itemMeta.progress}`}>
+                {progressLabels[itemMeta.progress]}
+              </span>
+            </div>
           </div>
         </div>
       </Modal>

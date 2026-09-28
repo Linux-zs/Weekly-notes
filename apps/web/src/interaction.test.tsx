@@ -393,6 +393,8 @@ describe('interactive limits and login availability', () => {
         return Promise.resolve({
           categories: [{ id: 'category-1', name: '开发', position: 0, archivedAt: null }]
         }) as never;
+      if (path === '/api/tags')
+        return Promise.resolve({ tags: [{ id: 'tag-1', name: '重点', color: '#CF4F1C' }] }) as never;
       if (path === '/api/report-items/item-1/attachments')
         return Promise.resolve({ attachments: [] }) as never;
       throw new Error(`Unexpected API path: ${path}`);
@@ -423,11 +425,32 @@ describe('interactive limits and login availability', () => {
     );
 
     expect(await screen.findByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
-    expect(screen.getByText('客户端', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getByText('开发', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getByText('08/18', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getByText('重点')).toBeTruthy();
-    expect(screen.getByText('等待发布窗口')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Markdown 内容' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '编辑 Markdown' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '完成编辑' })).toBeNull();
+    expect(screen.queryByText('发生日期')).toBeNull();
+    expect(screen.queryByText('栏目')).toBeNull();
+    // 元信息只保留「备注」，其余字段整体挪到整个详情页的最底部。
+    const metaRow = document.querySelector('.detail-meta-row');
+    expect(metaRow).toBeTruthy();
+    expect(metaRow?.children.length).toBe(1);
+    expect(metaRow?.textContent).toContain('备注');
+    expect(metaRow?.textContent).not.toContain('所属项目');
+    expect(screen.getByRole('textbox', { name: '备注' })).toBeTruthy();
+    const detailRoot = document.querySelector('.report-detail-editor');
+    const blocks = detailRoot ? Array.from(detailRoot.children).map((child) => child.className) : [];
+    expect(blocks[blocks.length - 1]).toContain('detail-meta-footer');
+    const footer = document.querySelector('.detail-meta-footer');
+    expect(footer?.textContent).toContain('所属项目');
+    expect(footer?.textContent).toContain('条目分类');
+    expect(footer?.textContent).toContain('标签');
+    expect(footer?.textContent).toContain('进度');
+    const projectField = screen.getByRole('combobox', { name: '所属项目' }) as HTMLSelectElement;
+    expect(projectField.selectedOptions[0]?.textContent).toContain('客户端');
+    const categoryField = screen.getByRole('combobox', { name: '条目分类' }) as HTMLSelectElement;
+    expect(categoryField.selectedOptions[0]?.textContent).toContain('开发');
+    expect(await screen.findByText('重点')).toBeTruthy();
+    expect((screen.getByRole('textbox', { name: '备注' }) as HTMLInputElement).value).toBe('等待发布窗口');
     await userEvent.click(screen.getByRole('button', { name: '关闭' }));
     await userEvent.click(screen.getByRole('button', { name: '完成接口改造' }));
     expect(screen.getByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();

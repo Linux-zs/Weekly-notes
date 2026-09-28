@@ -44,6 +44,15 @@ export function App() {
       localStorage.getItem('weekly-report:compact') === 'true'
     );
   }, []);
+  // 预热另外两个懒加载页面的 chunk，消除首次切换时的 Suspense 占位闪烁。
+  useEffect(() => {
+    const warm = () => {
+      void import('./pages/SearchPage');
+      void import('./pages/SettingsPage');
+    };
+    const id = window.setTimeout(warm, 1500);
+    return () => window.clearTimeout(id);
+  }, []);
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/api/me'), retry: false });
   // 薄玻璃导航：拖拽吸附、液滴拉伸/收缩/回弹，柔和表面光源 320ms 回中。
   useEffect(() => {
