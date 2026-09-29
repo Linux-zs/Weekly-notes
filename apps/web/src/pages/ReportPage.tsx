@@ -35,7 +35,6 @@ import {
   Download,
   GripVertical,
   Image as ImageIcon,
-  ImagePlus,
   Info,
   Pencil,
   Plus,
@@ -45,6 +44,8 @@ import {
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, ApiError } from '../api';
+import { DetailEditor } from '../DetailEditor';
+import { DetailEditorModel } from '../detail-editor-model';
 import { ErrorState, Loading, Modal, TagField } from '../components';
 import { createDeferredAction } from '../deferred-action';
 import { createLatestTaskQueue } from '../latest-task-queue';
@@ -1899,13 +1900,14 @@ function ReportItemRow({
   const acknowledgedRevision = useRef(0);
   const mounted = useRef(true);
   const skipNextSave = useRef(false);
+  const saveBlocked = useRef(restoredConflict);
   const deferredSave = useRef(createDeferredAction()).current;
   const saveTaskHandler = useRef<(task: ItemSaveTask) => Promise<void>>(async () => undefined);
   const saveQueue = useRef(
     createLatestTaskQueue((task: ItemSaveTask) => saveTaskHandler.current(task))
   ).current;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const editorModel = useRef<DetailEditorModel | null>(null);
   const latestDraft = useRef<ItemDraft>({
     contentMd: content,
     progress: itemMeta.progress,
@@ -2027,6 +2029,7 @@ function ReportItemRow({
       persistLatestDraft();
       if (mounted.current) {
         if (error instanceof ApiError && error.status === 409 && error.data?.current) {
+          saveBlocked.current = true;
           setConflictCurrent(error.data.current as ReportItem);
           setConflictReportVersion(
             typeof error.data.reportVersion === 'number' ? error.data.reportVersion : null
@@ -2038,6 +2041,7 @@ function ReportItemRow({
     }
   };
   const enqueueLatestDraft = () => {
+    if (saveBlocked.current) return;
     if (mounted.current) setStatus('saving');
     saveQueue.enqueue({
       revision: draftRevision.current,
@@ -2056,6 +2060,7 @@ function ReportItemRow({
     if (!draftChanges.hasChanged(latestDraft.current)) return;
     draftRevision.current += 1;
     persistLatestDraft();
+    if (saveBlocked.current) return;
     setStatus('saving');
     deferredSave.schedule(enqueueLatestDraft, 800);
   }, [content, itemMeta.progress, itemMeta.note, projectId, categoryId, itemType, occurredOn, tagKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2070,39 +2075,49 @@ function ReportItemRow({
     queryFn: () => api<{ attachments: Attachment[] }>(`/api/report-items/${item.id}/attachments`),
     enabled: detailsOpen
   });
-  const upload = useMutation({
-    mutationFn: async ({ file }: { file: File; insertAt: number }) => {
+  const editorCallbacks = {
+    change: (value: string) => {
+      latestDraft.current = { ...latestDraft.current, contentMd: value };
+      // Capture editor events synchronously so a close/unmount in the same tick can flush them.
+      if (draftChanges.hasChanged(latestDraft.current)) {
+        draftRevision.current += 1;
+        persistLatestDraft();
+        if (!saveBlocked.current) {
+          setStatus('saving');
+          deferredSave.schedule(enqueueLatestDraft, 800);
+        }
+      }
+      setContent(value);
+    },
+    upload: async (file: File) => {
       const form = new FormData();
       form.append('image', file);
-      return api<{ id: string; originalName: string; url: string }>(`/api/report-items/${item.id}/images`, {
+      const data = await api<{ url: string }>(`/api/report-items/${item.id}/images`, {
         method: 'POST',
         body: form
       });
+      void qc.invalidateQueries({ queryKey: ['attachments', item.id] });
+      return data;
     },
-    onSuccess: (data, { file, insertAt }) => {
-      qc.invalidateQueries({ queryKey: ['attachments', item.id] });
-      const alt =
-        file.name
-          .replace(/\.[^.]+$/, '')
-          .replace(/[[\]\\]/g, ' ')
-          .trim() || '图片';
-      let nextCursor = insertAt;
-      setContent((current) => {
-        const point = Math.min(insertAt, current.length);
-        const before = current.slice(0, point);
-        const after = current.slice(point);
-        const leading = before && !before.endsWith('\n') ? '\n\n' : '';
-        const trailing = after && !after.startsWith('\n') ? '\n\n' : '\n';
-        const markdown = `${leading}![${alt}](${data.url})${trailing}`;
-        nextCursor = point + markdown.length;
-        return before + markdown + after;
+    preview: setFullscreenImage
+  };
+  if (editorModel.current) editorModel.current.callbacks = editorCallbacks;
+  const getEditorModel = () => {
+    if (!editorModel.current)
+      editorModel.current = new DetailEditorModel(latestDraft.current.contentMd, editorCallbacks);
+    return editorModel.current;
+  };
+  useEffect(() => {
+    if (editorModel.current && editorModel.current.value !== content) editorModel.current.replace(content);
+  }, [content]);
+  useEffect(
+    () => () => {
+      queueMicrotask(() => {
+        if (!mounted.current) editorModel.current?.destroy();
       });
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
-      });
-    }
-  });
+    },
+    []
+  );
   const removeAttachment = useMutation({
     mutationFn: (id: string) => api(`/api/attachments/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['attachments', item.id] })
@@ -2132,6 +2147,64 @@ function ReportItemRow({
     persistLatestDraft();
     enqueueLatestDraft();
   };
+  const conflictNotice = status === 'conflict' && (
+    <div className="conflict-bar">
+      <span>服务器上的内容已经变化，当前编辑未覆盖。</span>
+      <button
+        onClick={() => {
+          if (!conflictCurrent) return;
+          deferredSave.cancel();
+          saveQueue.clearPending();
+          skipNextSave.current = true;
+          saveBlocked.current = false;
+          version.current = conflictCurrent.version;
+          acknowledgedRevision.current = draftRevision.current;
+          setContent(conflictCurrent.contentMd);
+          setItemMeta({ progress: conflictCurrent.progress, note: conflictCurrent.note });
+          setProjectId(conflictCurrent.projectId ?? '');
+          setCategoryId(conflictCurrent.categoryId ?? '');
+          setItemType(conflictCurrent.type);
+          setOccurredOn(conflictCurrent.occurredOn ?? '');
+          setTagIds(conflictCurrent.tags.map((tag) => tag.id));
+          setConflictCurrent(null);
+          setConflictReportVersion(null);
+          setStatus('saved');
+          removeItemDraft(item.id);
+          qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
+            old
+              ? {
+                  ...old,
+                  version: conflictReportVersion ?? old.version,
+                  items: old.items.map((existing) =>
+                    existing.id === conflictCurrent.id ? conflictCurrent : existing
+                  )
+                }
+              : old
+          );
+        }}
+      >
+        载入最新内容
+      </button>
+      <button
+        onClick={() => {
+          saveBlocked.current = false;
+          if (conflictCurrent) {
+            version.current = conflictCurrent.version;
+            persistLatestDraft(conflictCurrent.version);
+          }
+          if (conflictReportVersion !== null)
+            qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
+              old ? { ...old, version: conflictReportVersion } : old
+            );
+          setConflictCurrent(null);
+          setConflictReportVersion(null);
+          enqueueLatestDraft();
+        }}
+      >
+        重新应用本地修改
+      </button>
+    </div>
+  );
   const displayContent = summarizeMarkdown(content) || (content.trim() ? '点击打开详情' : '点击填写内容');
 
   return (
@@ -2239,75 +2312,23 @@ function ReportItemRow({
           </button>
         </div>
       </div>
-      {status === 'conflict' && (
-        <div className="conflict-bar">
-          <span>服务器上的内容已经变化，当前编辑未覆盖。</span>
-          <button
-            onClick={() => {
-              if (!conflictCurrent) return;
-              deferredSave.cancel();
-              saveQueue.clearPending();
-              skipNextSave.current = true;
-              version.current = conflictCurrent.version;
-              acknowledgedRevision.current = draftRevision.current;
-              setContent(conflictCurrent.contentMd);
-              setItemMeta({ progress: conflictCurrent.progress, note: conflictCurrent.note });
-              setProjectId(conflictCurrent.projectId ?? '');
-              setCategoryId(conflictCurrent.categoryId ?? '');
-              setItemType(conflictCurrent.type);
-              setOccurredOn(conflictCurrent.occurredOn ?? '');
-              setTagIds(conflictCurrent.tags.map((tag) => tag.id));
-              setConflictCurrent(null);
-              setConflictReportVersion(null);
-              setStatus('saved');
-              removeItemDraft(item.id);
-              qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
-                old
-                  ? {
-                      ...old,
-                      version: conflictReportVersion ?? old.version,
-                      items: old.items.map((existing) =>
-                        existing.id === conflictCurrent.id ? conflictCurrent : existing
-                      )
-                    }
-                  : old
-              );
-            }}
-          >
-            载入最新内容
-          </button>
-          <button
-            onClick={() => {
-              if (conflictCurrent) {
-                version.current = conflictCurrent.version;
-                persistLatestDraft(conflictCurrent.version);
-              }
-              if (conflictReportVersion !== null)
-                qc.setQueryData<WeeklyReport>(['report', report.weekYear, report.weekNumber], (old) =>
-                  old ? { ...old, version: conflictReportVersion } : old
-                );
-              setConflictCurrent(null);
-              setConflictReportVersion(null);
-              enqueueLatestDraft();
-            }}
-          >
-            重新应用本地修改
-          </button>
-        </div>
-      )}
+      {!detailsOpen && conflictNotice}
       <Modal
         open={detailsOpen}
         onOpenChange={(open) => {
           if (!open) {
+            editorModel.current?.flushComposition();
+            deferredSave.flush();
             setFullscreenImage(null);
             onCloseDetails();
           }
         }}
         title={`周报详情 · 第 ${sequence} 条`}
-        description="直接修改 Markdown；图片会插入当前光标位置。"
+        description="直接编辑图文，停止输入后自动保存。双击图片可全屏查看。"
         wide
       >
         <div className="report-detail-editor markdown-only-editor">
+          {conflictNotice}
           <div className="detail-editor-status">
             <div className="detail-save-state">
               <span className={`save-status ${status}`}>
@@ -2326,68 +2347,19 @@ function ReportItemRow({
                 </button>
               )}
             </div>
-            <div className="detail-edit-actions">
-              <div className="detail-tools">
-                  <input
-                    ref={fileInputRef}
-                    className="visually-hidden"
-                    type="file"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    accept="image/png,image/jpeg,image/gif,image/webp"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file)
-                        upload.mutate({
-                          file,
-                          insertAt: textareaRef.current?.selectionStart ?? content.length
-                        });
-                      event.currentTarget.value = '';
-                    }}
-                  />
-                  <button
-                    className="button secondary"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={upload.isPending}
-                  >
-                    {upload.isPending ? <RefreshCcw size={15} className="spin" /> : <ImagePlus size={15} />}
-                    添加图片
-                  </button>
-                  <span>PNG / JPEG / GIF / WebP，最大 8 MB</span>
-                  <span className="paste-image-hint">也可在正文中直接粘贴截图</span>
-                  {upload.error && <strong>{upload.error.message}</strong>}
-                </div>
-            </div>
           </div>
-            <div className="report-item-fields detail-meta-row">
-              <label className="detail-meta-field">
-                备注
-                <input
-                  value={itemMeta.note}
-                  onChange={(event) => setItemMeta((value) => ({ ...value, note: event.target.value }))}
-                  placeholder="添加备注"
-                  aria-label="备注"
-                />
-              </label>
-            </div>
-          <div className="markdown-editor-pane markdown-editor-single">
-            <span>MARKDOWN</span>
-            <textarea
-              ref={textareaRef}
-              autoFocus
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              onPaste={(event) => {
-                const file = clipboardImage(event.clipboardData);
-                if (!file) return;
-                event.preventDefault();
-                upload.mutate({ file, insertAt: event.currentTarget.selectionStart });
-              }}
-              rows={16}
-              placeholder="写下一件值得回看的事……"
-              aria-label="Markdown 内容"
-            />
+          <div className="report-item-fields detail-meta-row">
+            <label className="detail-meta-field">
+              备注
+              <input
+                value={itemMeta.note}
+                onChange={(event) => setItemMeta((value) => ({ ...value, note: event.target.value }))}
+                placeholder="添加备注"
+                aria-label="备注"
+              />
+            </label>
           </div>
+          <DetailEditor getModel={getEditorModel} />
           <div className="attachment-panel">
             <div className="attachment-panel-heading">
               <strong>附件</strong>
@@ -2417,9 +2389,15 @@ function ReportItemRow({
                             step="5"
                             value={attachmentImageWidth(content, attachment.id) ?? 70}
                             onChange={(event) =>
-                              setContent((current) =>
-                                setAttachmentImageWidth(current, attachment.id, Number(event.target.value))
-                              )
+                              editorModel.current && !editorModel.current.sourceMode
+                                ? editorModel.current.setImageWidth(attachment.id, Number(event.target.value))
+                                : setContent((current) =>
+                                    setAttachmentImageWidth(
+                                      current,
+                                      attachment.id,
+                                      Number(event.target.value)
+                                    )
+                                  )
                             }
                             aria-label={`调整图片 ${attachment.originalName} 的显示宽度`}
                           />

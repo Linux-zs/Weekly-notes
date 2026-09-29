@@ -425,7 +425,8 @@ describe('interactive limits and login availability', () => {
     );
 
     expect(await screen.findByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: 'Markdown 内容' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: '正文内容' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Markdown 源码' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '编辑 Markdown' })).toBeNull();
     expect(screen.queryByRole('button', { name: '完成编辑' })).toBeNull();
     expect(screen.queryByText('发生日期')).toBeNull();

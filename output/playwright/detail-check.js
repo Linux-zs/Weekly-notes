@@ -1,0 +1,34 @@
+async page => {
+  const body = page.getByRole('textbox', { name: '正文内容' });
+  const picture = body.getByRole('img', { name: '交付进展' });
+  await picture.click();
+  if (!await picture.evaluate(el => el.classList.contains('ProseMirror-selectednode'))) throw new Error('Image did not select');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.insertText('图片前中文');
+  await picture.click();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.insertText('图片后中文');
+  await page.waitForTimeout(1000);
+  if (!(await body.innerText()).includes('图片前中文') || !(await body.innerText()).includes('图片后中文')) throw new Error('Chinese input lost');
+  await picture.dblclick();
+  await page.getByRole('dialog', { name: '交付进展' }).waitFor();
+  await page.getByRole('dialog', { name: '交付进展' }).getByRole('button', { name: '关闭' }).click();
+  await picture.click();
+  await page.getByRole('slider', { name: '选中图片宽度' }).fill('65');
+  await page.waitForTimeout(1000);
+  if (await picture.evaluate(el => el.style.width) !== '65%') throw new Error('Resize failed');
+  await picture.click();
+  await page.keyboard.press('Backspace');
+  if (await picture.count()) throw new Error('Delete failed');
+  if (await page.getByRole('link', { name: '交付进展.png' }).count() !== 1) throw new Error('Attachment lost');
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  if (await picture.count() !== 1) throw new Error('Undo failed');
+  await page.waitForTimeout(1000);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('button', { name: /本周交付 完成/ }).click();
+  if (!(await body.innerText()).includes('图片前中文')) throw new Error('Reopen lost text');
+  if (await picture.evaluate(el => el.style.width) !== '65%') throw new Error('Reopen lost width');
+  const overflow = await page.getByRole('dialog').evaluate(el => el.scrollWidth > el.clientWidth);
+  if (overflow) throw new Error('Mobile dialog overflow');
+  console.log('PASS: mobile Chinese input around image, select, fullscreen, width, delete, undo, save/reopen, no horizontal overflow');
+}
