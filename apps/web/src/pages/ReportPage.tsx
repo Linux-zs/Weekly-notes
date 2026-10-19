@@ -1,3 +1,4 @@
+import { WeekNavigator } from '../WeekNavigator';
 import {
   closestCenter,
   DndContext,
@@ -30,7 +31,6 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
-  ChevronDown,
   Copy,
   Download,
   GripVertical,
@@ -67,8 +67,7 @@ import {
   sectionLabels,
   setAttachmentImageWidth,
   stripMarkdownImages,
-  todayInTimezone,
-  weeksInIsoYear
+  todayInTimezone
 } from '../lib';
 
 const sections: ReportItemType[] = ['completed', 'next_plan'];
@@ -442,7 +441,15 @@ export function ReportPage({ user }: { user: User }) {
               <strong>
                 {formatWeekHeadingDate(data.weekStart)}—{formatWeekHeadingDate(data.weekEnd)}
               </strong>
-              <span>第{week}周</span>
+              <WeekNavigator
+                year={year}
+                selectedWeek={week}
+                current={current}
+                weeks={reportWeeks.data!.weeks}
+                onSelect={(target) =>
+                  navigate(target === current.week && year === current.year ? '/' : `/week/${year}/${target}`)
+                }
+              />
             </div>
             <p className="week-byline">
               {year} 年 · 汇报人：{user.displayName}
@@ -459,15 +466,6 @@ export function ReportPage({ user }: { user: User }) {
             </button>
           </div>
         </div>
-        <WeekNavigator
-          year={year}
-          selectedWeek={week}
-          current={current}
-          weeks={reportWeeks.data!.weeks}
-          onSelect={(target) =>
-            navigate(target === current.week && year === current.year ? '/' : `/week/${year}/${target}`)
-          }
-        />
       </header>
       {!data.holidayDataAvailable && (
         <div className="holiday-data-notice" role="status">
@@ -602,72 +600,6 @@ function HolidaySummary({ report }: { report: WeeklyReport }) {
           {formatDate(day.date)} · {day.kind === 'holiday' ? day.name : '调休上班'}
         </span>
       ))}
-    </div>
-  );
-}
-
-function WeekNavigator({
-  year,
-  selectedWeek,
-  current,
-  weeks,
-  onSelect
-}: {
-  year: number;
-  selectedWeek: number;
-  current: { year: number; week: number };
-  weeks: Array<{ weekNumber: number; itemCount: number }>;
-  onSelect: (week: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const populated = new Set(weeks.map((item) => item.weekNumber));
-  const total = weeksInIsoYear(year);
-  return (
-    <div className={`year-weeks${open ? ' open' : ''}`}>
-      <button className="year-weeks-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        <span>
-          <CalendarDays size={14} />
-          选择周次
-        </span>
-        <small>
-          {year} · 共 {total} 周
-        </small>
-        <ChevronDown size={16} />
-      </button>
-      {open && (
-        <div className="year-weeks-panel">
-          <div className="year-weeks-heading">
-            <span>{year} 全年周次</span>
-            <div className="week-legend">
-              <span className="legend-current">本周</span>
-              <span className="legend-selected">当前选择</span>
-              <span className="legend-filled">有内容</span>
-            </div>
-          </div>
-          <div className="week-grid">
-            {Array.from({ length: total }, (_, index) => index + 1).map((number) => {
-              const selected = number === selectedWeek;
-              const isCurrent = year === current.year && number === current.week;
-              const hasContent = populated.has(number);
-              return (
-                <button
-                  key={number}
-                  className={`week-number${hasContent ? ' has-report' : ' empty'}${isCurrent ? ' current' : ''}${selected ? ' selected' : ''}`}
-                  onClick={() => {
-                    setOpen(false);
-                    onSelect(number);
-                  }}
-                  aria-current={selected ? 'page' : undefined}
-                  aria-label={`第 ${number} 周${hasContent ? '，有周报内容' : '，暂无周报内容'}${isCurrent ? '，本周' : ''}`}
-                >
-                  {number}
-                  {isCurrent && <i aria-hidden="true" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

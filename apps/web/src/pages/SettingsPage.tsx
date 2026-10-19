@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { readUiTheme, saveUiTheme, type UiTheme } from '../appearance';
+import { readUiTheme, saveUiTheme, UI_THEME_STORAGE_KEY, type UiTheme } from '../appearance';
 import { ErrorState, Loading, Modal } from '../components';
 import { ProjectSettings } from './ProjectsPage';
 
@@ -55,8 +55,9 @@ type Account = {
 };
 const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 const themeOptions: Array<{ value: UiTheme; name: string; description: string }> = [
-  { value: 'paperline', name: 'Paperline', description: '灰白纸页与陶橙强调' },
-  { value: 'ios-glass', name: 'iOS 玻璃', description: '液态玻璃与黑白灰强调' }
+  { value: 'ios-glass', name: 'iOS 液态玻璃', description: '默认 · 通透柔和的白天外观' },
+  { value: 'night', name: '夜间玻璃', description: '深色玻璃与清晰柔和的文字' },
+  { value: 'auto', name: '随时间自动', description: '本地时间 07:00–19:00 白天，其余夜间' }
 ];
 
 export function SettingsPage() {
@@ -145,8 +146,14 @@ function SettingsContent({
   const [deleteTagTarget, setDeleteTagTarget] = useState<Tag | null>(null);
   const [editCategory, setEditCategory] = useState<ReportCategory | null>(null);
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
-  const [compact, setCompact] = useState(() => localStorage.getItem('weekly-report:compact') === 'true');
   const [theme, setTheme] = useState<UiTheme>(() => readUiTheme());
+  useEffect(() => {
+    const syncPreference = (event: StorageEvent) => {
+      if (event.key === UI_THEME_STORAGE_KEY || event.key === null) setTheme(readUiTheme());
+    };
+    window.addEventListener('storage', syncPreference);
+    return () => window.removeEventListener('storage', syncPreference);
+  }, []);
   useEffect(() => {
     if (location.hash === '#projects')
       requestAnimationFrame(() => document.getElementById('projects')?.scrollIntoView({ block: 'start' }));
@@ -282,11 +289,6 @@ function SettingsContent({
     const active = archived ? categories.filter((item) => !item.archivedAt) : reordered;
     const retired = archived ? reordered : categories.filter((item) => item.archivedAt);
     reorderCategories.mutate([...active, ...retired].map((item) => item.id));
-  };
-  const applyCompact = (value: boolean) => {
-    setCompact(value);
-    localStorage.setItem('weekly-report:compact', String(value));
-    document.documentElement.classList.toggle('compact-ui', value);
   };
   const applyTheme = (value: UiTheme) => {
     setTheme(value);
@@ -731,7 +733,7 @@ function SettingsContent({
           </div>
           <div className="settings-body">
             <h2>界面外观</h2>
-            <p>选择适合当前环境的界面材质；主题与紧凑模式可以独立组合。</p>
+            <p>默认使用 iOS 液态玻璃，也可选择夜间外观或按设备本地时间自动切换。</p>
             <fieldset className="theme-picker">
               <legend>主题</legend>
               <div className="theme-options">
@@ -761,18 +763,6 @@ function SettingsContent({
                 ))}
               </div>
             </fieldset>
-            <div className="density-setting">
-              <strong>界面密度</strong>
-              <span>收紧页面留白、卡片间距与列表行高，适合信息较多的汇报。</span>
-              <label className="switch-row">
-                <input
-                  type="checkbox"
-                  checked={compact}
-                  onChange={(event) => applyCompact(event.target.checked)}
-                />
-                <span>启用紧凑模式</span>
-              </label>
-            </div>
           </div>
         </section>
       </div>

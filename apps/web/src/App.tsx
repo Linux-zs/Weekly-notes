@@ -3,6 +3,7 @@ import { BookOpenText, LogOut, Search, Settings } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { api, ApiError } from './api';
+import { watchUiTheme } from './appearance';
 import { createGlassRefractionMap } from './glass-refraction';
 import { Loading } from './components';
 import { browserTimezone, formatDate, isoWeekForDate, todayInTimezone, weekRangeForDate } from './lib';
@@ -38,12 +39,7 @@ export function App() {
   const lensContentRef = useRef<HTMLSpanElement>(null);
   // 拖拽结束后的下一次 click 需要被吞掉（跨 effect 重挂载保持）。
   const suppressClickRef = useRef(false);
-  useEffect(() => {
-    document.documentElement.classList.toggle(
-      'compact-ui',
-      localStorage.getItem('weekly-report:compact') === 'true'
-    );
-  }, []);
+  useEffect(watchUiTheme, []);
   // 预热另外两个懒加载页面的 chunk，消除首次切换时的 Suspense 占位闪烁。
   useEffect(() => {
     const warm = () => {

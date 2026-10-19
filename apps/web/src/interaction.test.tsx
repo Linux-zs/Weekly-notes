@@ -116,11 +116,11 @@ afterEach(() => {
   mockedApi.mockReset();
   vi.unstubAllGlobals();
   localStorage.removeItem(UI_THEME_STORAGE_KEY);
-  document.documentElement.dataset.theme = 'paperline';
+  document.documentElement.dataset.theme = 'ios-glass';
 });
 
 describe('interactive limits and login availability', () => {
-  it('switches visual themes from the settings page without changing density', async () => {
+  it('switches visual themes from the settings page and removes retired appearance controls', async () => {
     mockedApi.mockImplementation((path: string) => {
       if (path === '/api/settings')
         return Promise.resolve({
@@ -154,17 +154,18 @@ describe('interactive limits and login availability', () => {
       )
     );
 
-    const paperline = await screen.findByRole('radio', { name: /Paperline/ });
-    const glass = screen.getByRole('radio', { name: /iOS 玻璃/ });
-    const compact = screen.getByRole('checkbox', { name: '启用紧凑模式' });
-    expect((paperline as HTMLInputElement).checked).toBe(true);
-    expect((glass as HTMLInputElement).checked).toBe(false);
-    glass.focus();
-    await userEvent.keyboard(' ');
+    const glass = await screen.findByRole('radio', { name: /iOS 液态玻璃/ });
+    const night = screen.getByRole('radio', { name: /夜间玻璃/ });
     expect((glass as HTMLInputElement).checked).toBe(true);
-    expect(document.documentElement.dataset.theme).toBe('ios-glass');
-    expect(localStorage.getItem(UI_THEME_STORAGE_KEY)).toBe('ios-glass');
-    expect((compact as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole('radio', { name: /Paperline/ })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: '启用紧凑模式' })).toBeNull();
+    night.focus();
+    await userEvent.keyboard(' ');
+    expect((night as HTMLInputElement).checked).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe('night');
+    expect(localStorage.getItem(UI_THEME_STORAGE_KEY)).toBe('night');
+    await userEvent.click(screen.getByRole('radio', { name: /随时间自动/ }));
+    expect(localStorage.getItem(UI_THEME_STORAGE_KEY)).toBe('auto');
   });
 
   it('offers previous-week import from an empty report section', async () => {
