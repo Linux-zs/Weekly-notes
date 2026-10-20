@@ -82,6 +82,26 @@ location / {
 
 数据和备份分别挂载到 `runtime/data`、`runtime/backups`。每天北京时间 03:00 创建包含 SQLite 与上传图片的完整备份包，保留 30 天。
 
+### CNB 自动部署
+
+推送 `main` 后，CNB 会构建并推送带提交短哈希的镜像，再通过 SSH 部署到阿里云服务器。部署固定使用本次提交的镜像标签，不依赖可能变化的 `latest`；更新前创建应用备份，更新后等待容器健康检查，失败时恢复上一份 Compose 镜像覆盖配置。
+
+部署目标为 `udong@106.15.195.19:22`，目录为 `/data/Weekly-notes`。服务器需允许 `udong` 读取该目录并执行 Docker 命令，并已存在生产 `.env` 与 `compose.yaml`。Compose 镜像覆盖配置和回滚状态写入 `~/.local/state/zhoubao-deploy`，因此项目目录和数据卷可以继续由 root 所有。
+
+CNB 密钥仓库使用 `Linuxzs/udong-ssh`，其中 `deploy.yml` 的内容为：
+
+```yaml
+ZHOU_BAO_DEPLOY_SSH_KEY: |
+  <仅用于部署的 OpenSSH 私钥>
+
+allow_images:
+  - cnbcool/ssh
+allow_slugs:
+  - Linuxzs/zhoubao
+```
+
+对应公钥只授予 `udong` 登录权限。私钥只能存放在 CNB 密钥仓库，禁止加入本仓库、`.env`、构建日志或服务器目录。
+
 手动备份：
 
 ```bash

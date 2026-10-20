@@ -18,3 +18,88 @@ main:
           script: |
             docker push ${IMAGE_NAME}:latest
             docker push ${IMAGE_NAME}:${CNB_COMMIT_SHORT}
+
+        - name: Deploy to Aliyun
+          imports: https://cnb.cool/Linuxzs/udong-ssh/-/blob/main/deploy.yml
+          image: cnbcool/ssh
+          settings:
+            host: 106.15.195.19
+            port: 22
+            username: udong
+            key: $ZHOU_BAO_DEPLOY_SSH_KEY
+            script_stop: true
+            command_timeout: 10m
+            script: |
+              set -eu
+
+              DEPLOY_DIR=/data/Weekly-notes
+              STATE_DIR="${HOME}/.local/state/zhoubao-deploy"
+              IMAGE_NAME=${IMAGE_NAME}:${CNB_COMMIT_SHORT}
+              OVERRIDE_FILE="$STATE_DIR/compose.cnb.yaml"
+              PREVIOUS_OVERRIDE="$STATE_DIR/compose.cnb.previous.yaml"
+
+              mkdir -p "$STATE_DIR"
+              chmod 700 "$STATE_DIR"
+              cd "$DEPLOY_DIR"
+              test -f compose.yaml
+              docker compose version
+
+              if [ -f "$OVERRIDE_FILE" ]; then
+                COMPOSE_ARGS="-f compose.yaml -f $OVERRIDE_FILE"
+                cp "$OVERRIDE_FILE" "$PREVIOUS_OVERRIDE"
+              else
+                COMPOSE_ARGS="-f compose.yaml"
+                rm -f "$PREVIOUS_OVERRIDE"
+              fi
+
+              CURRENT_CONTAINER=$(docker compose $COMPOSE_ARGS ps -q app 2>/dev/null || true)
+              if [ -n "$CURRENT_CONTAINER" ]; then
+                docker compose $COMPOSE_ARGS exec -T app \
+                  node apps/server/dist/scripts/backup.js
+              fi
+
+              docker pull "$IMAGE_NAME"
+
+              cat > "$OVERRIDE_FILE.tmp" <<EOF
+              services:
+                app:
+                  image: $IMAGE_NAME
+              EOF
+              mv "$OVERRIDE_FILE.tmp" "$OVERRIDE_FILE"
+
+              rollback() {
+                if [ -f "$PREVIOUS_OVERRIDE" ]; then
+                  mv "$PREVIOUS_OVERRIDE" "$OVERRIDE_FILE"
+                  docker compose --project-directory "$DEPLOY_DIR" -f compose.yaml -f "$OVERRIDE_FILE" up -d --no-deps app
+                else
+                  rm -f "$OVERRIDE_FILE"
+                  docker compose --project-directory "$DEPLOY_DIR" -f compose.yaml up -d --no-deps app
+                fi
+              }
+
+              if ! docker compose --project-directory "$DEPLOY_DIR" -f compose.yaml -f "$OVERRIDE_FILE" up -d --no-deps app; then
+                rollback
+                exit 1
+              fi
+
+              HEALTHY=false
+              for attempt in $(seq 1 30); do
+                CONTAINER=$(docker compose --project-directory "$DEPLOY_DIR" -f compose.yaml -f "$OVERRIDE_FILE" ps -q app)
+                STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)
+                if [ "$STATUS" = healthy ]; then
+                  HEALTHY=true
+                  break
+                fi
+                if [ "$STATUS" = unhealthy ] || [ "$STATUS" = exited ] || [ "$STATUS" = dead ]; then
+                  break
+                fi
+                sleep 4
+              done
+
+              if [ "$HEALTHY" != true ]; then
+                rollback
+                exit 1
+              fi
+
+              rm -f "$PREVIOUS_OVERRIDE"
+              docker compose --project-directory "$DEPLOY_DIR" -f compose.yaml -f "$OVERRIDE_FILE" ps app
