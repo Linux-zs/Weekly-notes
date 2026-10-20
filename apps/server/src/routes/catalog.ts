@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { projectInputSchema, reportCategoryInputSchema } from '@zhoubao/shared';
+import { projectInputSchema, projectPatchSchema, reportCategoryInputSchema } from '@zhoubao/shared';
 import { z } from 'zod';
 import { id, now, sqlite } from '../db/index.js';
 import { isSqliteUniqueConstraint } from '../db/errors.js';
@@ -138,24 +138,39 @@ export async function registerCatalog(app: FastifyInstance) {
   });
 
   app.post('/api/categories/reorder', { preHandler: requireUser }, async (request, reply) => {
-    const body = z.object({ ids: z.array(z.string().uuid()) }).parse(request.body);
+    const body = z
+      .object({ ids: z.array(z.string().uuid()), expectedIds: z.array(z.string().uuid()) })
+      .parse(request.body);
     const workspaceId = request.currentUser!.workspaceId;
-    const current = sqlite
-      .prepare('SELECT id FROM report_categories WHERE workspace_id=? ORDER BY position,name')
-      .all(workspaceId) as Array<{ id: string }>;
-    if (
-      body.ids.length !== current.length ||
-      new Set(body.ids).size !== body.ids.length ||
-      current.some((category) => !body.ids.includes(category.id))
-    )
-      return reply.code(400).send({ error: 'INVALID_CATEGORY_ORDER' });
-    const timestamp = now();
-    const update = sqlite.prepare(
-      'UPDATE report_categories SET position=?,updated_at=? WHERE id=? AND workspace_id=?'
-    );
-    sqlite.transaction(() =>
-      body.ids.forEach((categoryId, position) => update.run(position, timestamp, categoryId, workspaceId))
-    )();
+    const outcome = sqlite.transaction(() => {
+      const current = sqlite
+        .prepare(
+          'SELECT id FROM report_categories WHERE workspace_id=? ORDER BY archived_at IS NOT NULL,position,name COLLATE NOCASE'
+        )
+        .all(workspaceId) as Array<{ id: string }>;
+      if (
+        body.expectedIds.length !== current.length ||
+        current.some((category, index) => category.id !== body.expectedIds[index])
+      )
+        return 'conflict';
+      if (
+        body.ids.length !== current.length ||
+        new Set(body.ids).size !== body.ids.length ||
+        current.some((category) => !body.ids.includes(category.id))
+      )
+        return 'invalid';
+      const timestamp = now();
+      const update = sqlite.prepare(
+        'UPDATE report_categories SET position=?,updated_at=? WHERE id=? AND workspace_id=?'
+      );
+      body.ids.forEach((categoryId, position) => update.run(position, timestamp, categoryId, workspaceId));
+      return 'ok';
+    })();
+    if (outcome === 'conflict')
+      return reply
+        .code(409)
+        .send({ error: 'CATEGORY_ORDER_CONFLICT', message: '分类顺序已被其他操作修改，请基于最新顺序重试' });
+    if (outcome === 'invalid') return reply.code(400).send({ error: 'INVALID_CATEGORY_ORDER' });
     return { ok: true };
   });
 
@@ -281,10 +296,7 @@ export async function registerCatalog(app: FastifyInstance) {
 
   app.patch('/api/projects/:id', { preHandler: requireUser }, async (request, reply) => {
     const { id: projectId } = uuidParam.parse(request.params);
-    const input = projectInputSchema
-      .partial()
-      .extend({ archived: z.boolean().optional() })
-      .parse(request.body);
+    const input = projectPatchSchema.extend({ archived: z.boolean().optional() }).parse(request.body);
     const current = sqlite
       .prepare('SELECT name,color,position,archived_at FROM projects WHERE id=? AND workspace_id=?')
       .get(projectId, request.currentUser!.workspaceId) as ProjectRow | undefined;
@@ -352,7 +364,10 @@ export async function registerCatalog(app: FastifyInstance) {
 
   app.patch('/api/tags/:id', { preHandler: requireUser }, async (request, reply) => {
     const { id: tagId } = uuidParam.parse(request.params);
-    const input = tagInput.partial().parse(request.body);
+    const input = tagInput
+      .extend({ color: tagInput.shape.color.removeDefault() })
+      .partial()
+      .parse(request.body);
     const current = sqlite
       .prepare('SELECT name,color FROM tags WHERE id=? AND workspace_id=?')
       .get(tagId, request.currentUser!.workspaceId) as TagRow | undefined;

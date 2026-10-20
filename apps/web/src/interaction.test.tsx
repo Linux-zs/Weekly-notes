@@ -57,7 +57,8 @@ const categoryPickerUser = {
 
 function renderCategoryPickerReport(
   categories: Array<{ id: string; name: string; position: number; archivedAt: string | null }>,
-  mutate: (path: string, init?: RequestInit) => Promise<unknown>
+  mutate: (path: string, init?: RequestInit) => Promise<unknown>,
+  weeksUnavailable = false
 ) {
   const report = {
     id: 'report-34',
@@ -90,7 +91,8 @@ function renderCategoryPickerReport(
   mockedApi.mockImplementation((path: string, init?: RequestInit) => {
     if (path === '/api/reports/2026/34') return Promise.resolve(report) as never;
     if (path === '/api/report-weeks/2026')
-      return Promise.resolve({ year: 2026, weeks: [{ weekNumber: 34, itemCount: 1 }] }) as never;
+      if (weeksUnavailable) return Promise.reject(new Error('week summary failed'));
+      else return Promise.resolve({ year: 2026, weeks: [{ weekNumber: 34, itemCount: 1 }] }) as never;
     if (path === '/api/projects')
       return Promise.resolve({
         projects: [{ id: 'project-1', name: '客户端', color: '#CF4F1C', position: 0, archivedAt: null }]
@@ -120,6 +122,93 @@ afterEach(() => {
 });
 
 describe('interactive limits and login availability', () => {
+  it.each(['/api/settings', '/api/auth/accounts', '/api/auth/providers', '/api/tags', '/api/categories'])(
+    'keeps local appearance and unrelated settings usable when %s fails',
+    async (failedPath) => {
+      mockedApi.mockImplementation((path: string) => {
+        if (path === failedPath) return Promise.reject(new Error('本区域暂不可用'));
+        if (path === '/api/settings')
+          return Promise.resolve({
+            profile: { displayName: '独立资料', timezone: 'Asia/Shanghai', avatarUrl: null, email: null },
+            workspace: { id: 'independent', name: '独立空间', type: 'personal' },
+            workspaces: [],
+            members: [],
+            invitations: [],
+            role: 'owner'
+          }) as never;
+        return Promise.resolve({
+          reports: [],
+          hasMore: false,
+          accounts: [],
+          providers: [],
+          tags: [],
+          categories: [],
+          projects: []
+        }) as never;
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        queryWrapper(
+          client,
+          <MemoryRouter>
+            <SettingsPage />
+          </MemoryRouter>
+        )
+      );
+      expect(await screen.findByText('本区域暂不可用')).toBeTruthy();
+      await userEvent.click(screen.getByRole('radio', { name: /夜间玻璃/ }));
+      expect(document.documentElement.dataset.theme).toBe('night');
+      if (failedPath !== '/api/settings') {
+        expect(screen.getByDisplayValue('独立资料')).toBeTruthy();
+        expect(screen.getAllByRole('button', { name: '上传头像' })).toHaveLength(1);
+        expect(screen.queryByRole('button', { name: '上传自定义头像' })).toBeNull();
+        expect(document.querySelector<HTMLInputElement>('input[type=file]')?.hidden).toBe(true);
+      }
+      const count = mockedApi.mock.calls.filter(([path]) => path === failedPath).length;
+      await userEvent.click(screen.getByRole('button', { name: /重新加载/ }));
+      await waitFor(() =>
+        expect(mockedApi.mock.calls.filter(([path]) => path === failedPath).length).toBe(count + 1)
+      );
+    }
+  );
+  it.each([
+    '/week/2025/53',
+    '/week/2026/0',
+    '/week/2026/-1',
+    '/week/2026/1.5',
+    '/week/NaN/1',
+    '/week/2201/1'
+  ])('redirects invalid ISO week route %s without fetching it', async (path) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      queryWrapper(
+        client,
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/week/:year/:week" element={<ReportPage user={categoryPickerUser} />} />
+            <Route path="/" element={<div>返回本周</div>} />
+          </Routes>
+        </MemoryRouter>
+      )
+    );
+    expect(await screen.findByText('返回本周')).toBeTruthy();
+    expect(mockedApi).not.toHaveBeenCalled();
+  });
+  it('keeps reports available when week summary fails and retries independently', async () => {
+    renderCategoryPickerReport([], async () => ({}), true);
+    expect(await screen.findByText('已有任务')).toBeTruthy();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /选择周次/ }));
+    expect(await screen.findByText('周次内容状态暂不可用，仍可选择周次。')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /内容状态未知/ })).toHaveLength(53);
+    const before = mockedApi.mock.calls.filter(([path]) => path === '/api/report-weeks/2026').length;
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() =>
+      expect(mockedApi.mock.calls.filter(([path]) => path === '/api/report-weeks/2026').length).toBe(
+        before + 1
+      )
+    );
+  });
   it('switches visual themes from the settings page and removes retired appearance controls', async () => {
     mockedApi.mockImplementation((path: string) => {
       if (path === '/api/settings')
@@ -136,6 +225,8 @@ describe('interactive limits and login availability', () => {
           invitations: [],
           role: 'owner'
         }) as never;
+      if (path.startsWith('/api/settings/departed-reports'))
+        return Promise.resolve({ reports: [], hasMore: false }) as never;
       if (path === '/api/auth/accounts') return Promise.resolve({ accounts: [] }) as never;
       if (path === '/api/auth/providers')
         return Promise.resolve({ devAuthEnabled: true, providers: [] }) as never;
@@ -426,7 +517,7 @@ describe('interactive limits and login availability', () => {
     );
 
     expect(await screen.findByRole('dialog', { name: '周报详情 · 第 1 条' })).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: '正文内容' })).toBeTruthy();
+    expect(await screen.findByRole('textbox', { name: '正文内容' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Markdown 源码' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '编辑 Markdown' })).toBeNull();
     expect(screen.queryByRole('button', { name: '完成编辑' })).toBeNull();

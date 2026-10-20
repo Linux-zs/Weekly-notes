@@ -36,7 +36,8 @@ if (parsed.NODE_ENV === 'production' && parsed.DEV_AUTH_BYPASS === 'true') {
 export const config = {
   ...parsed,
   isProduction: parsed.NODE_ENV === 'production',
-  trustProxy: parsed.TRUST_PROXY === 'true',
+  // Supported deployment has exactly one trusted reverse proxy in front of the app.
+  trustProxy: parsed.TRUST_PROXY === 'true' ? 1 : false,
   devAuthBypass: parsed.DEV_AUTH_BYPASS === 'true',
   appleEnabled: parsed.APPLE_ENABLED === 'true',
   databasePath: path.resolve(workspaceRoot, parsed.DATABASE_PATH),

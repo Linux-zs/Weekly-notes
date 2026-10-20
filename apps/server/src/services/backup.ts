@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import { promises as files } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { FastifyBaseLogger } from 'fastify';
@@ -18,7 +18,7 @@ function safeBackupPath(root: string, relative: string) {
   return target;
 }
 
-function validateBackup(databasePath: string, uploadsRoot: string) {
+function backupReferences(databasePath: string) {
   const backup = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
     const attachments = backup
@@ -33,22 +33,20 @@ function validateBackup(databasePath: string, uploadsRoot: string) {
       ...attachments.map((entry) => entry.storedName),
       ...avatars.map((entry) => path.join('avatars', entry.avatarUrl.split('/').pop()!))
     ];
-    const missing = files.filter((relative) => !fs.existsSync(safeBackupPath(uploadsRoot, relative)));
-    if (missing.length) throw new Error(`BACKUP_FILES_MISSING:${missing.join(',')}`);
-    return { attachments: attachments.length, avatars: avatars.length, verifiedFiles: files.length };
+    return { files, attachments: attachments.length, avatars: avatars.length, verifiedFiles: files.length };
   } finally {
     backup.close();
   }
 }
 
-function pruneBackups(log?: FastifyBaseLogger) {
+async function pruneBackups(log?: FastifyBaseLogger) {
   const cutoff = Date.now() - retentionMs;
   try {
-    for (const entry of fs.readdirSync(config.backupDir, { withFileTypes: true })) {
+    for (const entry of await files.readdir(config.backupDir, { withFileTypes: true })) {
       if (!entry.name.startsWith('zhoubao-') || entry.name.endsWith('.tmp')) continue;
       const target = path.join(config.backupDir, entry.name);
-      if (fs.statSync(target).mtimeMs < cutoff)
-        fs.rmSync(target, { recursive: entry.isDirectory(), force: true });
+      if ((await files.stat(target)).mtimeMs < cutoff)
+        await files.rm(target, { recursive: entry.isDirectory(), force: true });
     }
   } catch (error) {
     log?.warn({ err: error }, 'Backup retention cleanup failed');
@@ -56,40 +54,59 @@ function pruneBackups(log?: FastifyBaseLogger) {
 }
 
 export async function createBackup(log?: FastifyBaseLogger) {
-  fs.mkdirSync(config.backupDir, { recursive: true });
+  await files.mkdir(config.backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const destination = path.join(config.backupDir, `zhoubao-${stamp}-${crypto.randomUUID().slice(0, 8)}`);
   const staging = `${destination}-${crypto.randomUUID()}.tmp`;
-  await withStorageLock(async () => {
-    fs.mkdirSync(staging, { recursive: false });
-    try {
-      const databasePath = path.join(staging, 'zhoubao.sqlite');
+  const pins = path.join(config.uploadDir, `.backup-pins-${crypto.randomUUID()}`);
+  await files.mkdir(staging, { recursive: false });
+  try {
+    const databasePath = path.join(staging, 'zhoubao.sqlite');
+    const references = await withStorageLock(async () => {
       await sqlite.backup(databasePath);
-      const uploadsDestination = path.join(staging, 'uploads');
-      if (fs.existsSync(config.uploadDir))
-        fs.cpSync(config.uploadDir, uploadsDestination, { recursive: true, errorOnExist: true });
-      else fs.mkdirSync(uploadsDestination, { recursive: true });
-      const integrity = validateBackup(databasePath, uploadsDestination);
-      fs.writeFileSync(
-        path.join(staging, 'manifest.json'),
-        JSON.stringify(
-          {
-            createdAt: new Date().toISOString(),
-            database: 'zhoubao.sqlite',
-            uploads: 'uploads',
-            integrity: { verified: true, ...integrity }
-          },
-          null,
-          2
-        )
-      );
-      fs.renameSync(staging, destination);
-    } catch (error) {
-      fs.rmSync(staging, { recursive: true, force: true });
-      throw error;
-    }
-  });
-  pruneBackups(log);
+      const references = backupReferences(databasePath);
+      await files.mkdir(pins, { recursive: true });
+      // Uploads are immutable UUID-named files. Same-volume hard links preserve
+      // snapshot contents even when a subsequent request deletes the originals.
+      for (const relative of new Set(references.files)) {
+        const pinned = safeBackupPath(pins, relative);
+        await files.mkdir(path.dirname(pinned), { recursive: true });
+        try {
+          await files.link(safeBackupPath(config.uploadDir, relative), pinned);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+            throw new Error(`BACKUP_FILES_MISSING:${relative}`, { cause: error });
+          throw error;
+        }
+      }
+      return references;
+    });
+    const uploadsDestination = path.join(staging, 'uploads');
+    await files.cp(pins, uploadsDestination, { recursive: true, errorOnExist: true });
+    for (const relative of references.files) await files.access(safeBackupPath(uploadsDestination, relative));
+    const { files: referencedFiles, ...integrity } = references;
+    await files.writeFile(
+      path.join(staging, 'manifest.json'),
+      JSON.stringify(
+        {
+          createdAt: new Date().toISOString(),
+          database: 'zhoubao.sqlite',
+          uploads: 'uploads',
+          integrity: { verified: true, ...integrity },
+          fileCount: referencedFiles.length
+        },
+        null,
+        2
+      )
+    );
+    await files.rename(staging, destination);
+  } catch (error) {
+    await files.rm(staging, { recursive: true, force: true });
+    throw error;
+  } finally {
+    await files.rm(pins, { recursive: true, force: true });
+  }
+  await pruneBackups(log);
   return destination;
 }
 

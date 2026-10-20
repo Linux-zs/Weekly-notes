@@ -76,6 +76,8 @@ async function open(patch: (body: Record<string, unknown>) => Promise<unknown>) 
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(20);
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(300);
   });
   return (screen.getByRole('textbox', { name: '正文内容' }) as HTMLElement & { editor: Editor }).editor;
 }

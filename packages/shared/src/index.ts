@@ -28,6 +28,11 @@ export const reportCategoryInputSchema = z.object({
   name: z.string().trim().min(1).max(40)
 });
 
+// PATCH must preserve omitted fields rather than applying creation defaults.
+export const reportItemPatchSchema = reportItemInputSchema
+  .extend({ tagIds: reportItemInputSchema.shape.tagIds.removeDefault() })
+  .partial();
+
 export const projectInputSchema = z.object({
   name: z.string().trim().min(1).max(80),
   color: z
@@ -35,6 +40,10 @@ export const projectInputSchema = z.object({
     .regex(/^#[0-9A-Fa-f]{6}$/)
     .default('#61758A')
 });
+
+export const projectPatchSchema = projectInputSchema
+  .extend({ color: projectInputSchema.shape.color.removeDefault() })
+  .partial();
 
 export interface UserSummary {
   id: string;

@@ -16,6 +16,31 @@ function root() {
 }
 
 describe('UI theme preference', () => {
+  it('updates browser chrome and only schedules automatic theme boundaries', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 19, 18));
+    const meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.append(meta);
+    initializeUiTheme({ getItem: () => 'night', setItem: vi.fn() });
+    const stop = watchUiTheme();
+    try {
+      expect(meta.content).toBe('#101722');
+      expect(vi.getTimerCount()).toBe(0);
+      saveUiTheme('auto', null);
+      expect(vi.getTimerCount()).toBe(1);
+      expect(meta.content).toBe('#f3f9ff');
+      vi.advanceTimersByTime(60 * 60 * 1000);
+      expect(meta.content).toBe('#101722');
+      expect(vi.getTimerCount()).toBe(1);
+      saveUiTheme('ios-glass', null);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      stop();
+      meta.remove();
+      vi.useRealTimers();
+    }
+  });
   it.each([
     [6, 59, 'night'],
     [7, 0, 'ios-glass'],

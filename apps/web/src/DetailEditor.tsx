@@ -13,8 +13,16 @@ import {
   ImagePlus,
   Table2
 } from 'lucide-react';
-import type { DetailEditorModel } from './detail-editor-model';
+import { DetailEditorModel } from './detail-editor-model';
 import { safeEditorUrl, imageWidth } from './detail-markdown';
+
+export function ReportDetailEditor({
+  getModel
+}: {
+  getModel: (Model: typeof DetailEditorModel) => DetailEditorModel;
+}) {
+  return <DetailEditor getModel={() => getModel(DetailEditorModel)} />;
+}
 
 export function DetailEditor({ getModel }: { getModel: () => DetailEditorModel }) {
   const [model] = useState(getModel);

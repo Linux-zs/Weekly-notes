@@ -81,8 +81,8 @@ export function Markdown({
 }
 
 export function formatDate(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(
-    new Date(`${value}T00:00:00+08:00`)
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', timeZone: 'UTC' }).format(
+    new Date(`${value}T00:00:00Z`)
   );
 }
 export function addDays(value: string, days: number) {

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zhoubao-api-'));
 process.env.NODE_ENV = 'test';
@@ -20,6 +20,16 @@ beforeAll(async () => {
   const module = await import('./app.js');
   app = await module.buildApp();
   ({ sqlite } = await import('./db/index.js'));
+  sqlite
+    .prepare('INSERT INTO users(id,display_name,email,timezone,created_at,updated_at) VALUES(?,?,?,?,?,?)')
+    .run(
+      'existing-real-user',
+      '真实用户',
+      'real@example.test',
+      'Asia/Shanghai',
+      '2000-01-01T00:00:00.000Z',
+      '2000-01-01T00:00:00.000Z'
+    );
   const login = await app.inject({ method: 'GET', url: '/auth/dev' });
   const setCookie = login.headers['set-cookie'];
   const firstCookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
@@ -43,6 +53,307 @@ function listFiles(root: string): string[] {
 }
 
 describe('authenticated weekly report workflow', () => {
+  it('lets owners manage departed reports without touching active members or other workspaces', async () => {
+    const me = (await app.inject({ url: '/api/me', headers: headers() })).json().user;
+    const memberId = crypto.randomUUID(),
+      reportId = crypto.randomUUID(),
+      itemId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    sqlite
+      .prepare('INSERT INTO users(id,display_name,timezone,created_at,updated_at) VALUES(?,?,?,?,?)')
+      .run(memberId, '已移除测试成员', 'Asia/Shanghai', timestamp, timestamp);
+    sqlite
+      .prepare("INSERT INTO workspace_members(workspace_id,user_id,role,created_at) VALUES(?,?,'member',?)")
+      .run(me.workspaceId, memberId, timestamp);
+    const project = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: headers(),
+        payload: { name: '离职成员项目' }
+      })
+    ).json();
+    sqlite
+      .prepare(
+        'INSERT INTO weekly_reports(id,workspace_id,author_id,week_year,week_number,week_start,week_end,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)'
+      )
+      .run(reportId, me.workspaceId, memberId, 2043, 1, '2042-12-29', '2043-01-04', timestamp, timestamp);
+    sqlite
+      .prepare(
+        "INSERT INTO report_items(id,report_id,project_id,type,content_md,created_at,updated_at) VALUES(?,?,?,'completed',?,?,?)"
+      )
+      .run(itemId, reportId, project.id, '原成员历史内容', timestamp, timestamp);
+    expect(
+      (await app.inject({ url: '/api/settings/departed-reports', headers: headers() })).json().reports
+    ).toHaveLength(0);
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: `/api/settings/departed-reports/${reportId}`,
+          headers: headers()
+        })
+      ).statusCode
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: 'DELETE', url: `/api/settings/members/${memberId}`, headers: headers() }))
+        .statusCode
+    ).toBe(204);
+    const archive = (await app.inject({ url: '/api/settings/departed-reports', headers: headers() })).json();
+    expect(archive.reports[0]).toMatchObject({
+      id: reportId,
+      authorName: '已移除测试成员',
+      items: [expect.objectContaining({ contentMd: '原成员历史内容', projectName: '离职成员项目' })]
+    });
+    sqlite
+      .prepare("UPDATE workspace_members SET role='member' WHERE workspace_id=? AND user_id=?")
+      .run(me.workspaceId, me.id);
+    try {
+      expect(
+        (await app.inject({ url: '/api/settings/departed-reports', headers: headers() })).statusCode
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'DELETE',
+            url: `/api/settings/departed-reports/${reportId}`,
+            headers: headers()
+          })
+        ).statusCode
+      ).toBe(403);
+    } finally {
+      sqlite
+        .prepare("UPDATE workspace_members SET role='owner' WHERE workspace_id=? AND user_id=?")
+        .run(me.workspaceId, me.id);
+    }
+    const foreignWorkspace = crypto.randomUUID();
+    const foreignReport = crypto.randomUUID();
+    sqlite
+      .prepare("INSERT INTO workspaces(id,name,type,created_at,updated_at) VALUES(?,?,'personal',?,?)")
+      .run(foreignWorkspace, '隔离空间', timestamp, timestamp);
+    sqlite
+      .prepare(
+        'INSERT INTO weekly_reports(id,workspace_id,author_id,week_year,week_number,week_start,week_end,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)'
+      )
+      .run(
+        foreignReport,
+        foreignWorkspace,
+        memberId,
+        2043,
+        1,
+        '2042-12-29',
+        '2043-01-04',
+        timestamp,
+        timestamp
+      );
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: `/api/settings/departed-reports/${foreignReport}`,
+          headers: headers()
+        })
+      ).statusCode
+    ).toBe(404);
+    expect(
+      (await app.inject({ url: '/api/settings/departed-reports', headers: headers() }))
+        .json()
+        .reports.map((report: { id: string }) => report.id)
+    ).not.toContain(foreignReport);
+    expect(sqlite.prepare('SELECT id FROM weekly_reports WHERE id=?').get(foreignReport)).toBeDefined();
+    sqlite.prepare('DELETE FROM workspaces WHERE id=?').run(foreignWorkspace);
+    expect(
+      (await app.inject({ method: 'DELETE', url: `/api/projects/${project.id}`, headers: headers() }))
+        .statusCode
+    ).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: `/api/settings/departed-reports/${reportId}`,
+          headers: headers()
+        })
+      ).statusCode
+    ).toBe(204);
+    expect(sqlite.prepare('SELECT id FROM report_items WHERE id=?').get(itemId)).toBeUndefined();
+    expect(
+      (await app.inject({ method: 'DELETE', url: `/api/projects/${project.id}`, headers: headers() }))
+        .statusCode
+    ).toBe(204);
+  });
+  it('reinvites an expired pending invitation without waiting for maintenance', async () => {
+    const invite = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/settings/invitations',
+        headers: headers(),
+        payload: { email: 'expired-reinvite@example.test' }
+      });
+    const first = await invite();
+    expect(first.statusCode).toBe(201);
+    expect((await invite()).statusCode).toBe(409);
+    sqlite
+      .prepare('UPDATE workspace_invitations SET expires_at=? WHERE id=?')
+      .run('2000-01-01T00:00:00.000Z', first.json().id);
+    const second = await invite();
+    expect(second.statusCode).toBe(201);
+    expect(second.json().id).not.toBe(first.json().id);
+    expect(
+      sqlite.prepare('SELECT status FROM workspace_invitations WHERE id=?').get(first.json().id)
+    ).toEqual({ status: 'revoked' });
+    await app.inject({
+      method: 'DELETE',
+      url: `/api/settings/invitations/${second.json().id}`,
+      headers: headers()
+    });
+  });
+  it('loads list tags in one batch while preserving empty and multiple tags', async () => {
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2042/1',
+      headers: headers(),
+      payload: {}
+    });
+    const tagIds: string[] = [];
+    for (const name of ['批量 B', '批量 A']) {
+      const tag = await app.inject({
+        method: 'POST',
+        url: '/api/tags',
+        headers: headers(),
+        payload: { name }
+      });
+      expect(tag.statusCode).toBe(201);
+      tagIds.push(tag.json().id);
+    }
+    for (let index = 0; index < 3; index++) {
+      const item = await app.inject({
+        method: 'POST',
+        url: `/api/reports/${report.json().id}/items`,
+        headers: headers(),
+        payload: { type: 'completed', contentMd: `批量查询 ${index}`, tagIds: index === 0 ? [] : tagIds }
+      });
+      expect(item.statusCode).toBe(201);
+    }
+    const prepare = vi.spyOn(sqlite, 'prepare');
+    try {
+      for (const url of ['/api/reports/2042/1', '/api/search?q=' + encodeURIComponent('批量查询')]) {
+        prepare.mockClear();
+        const response = await app.inject({ method: 'GET', url, headers: headers() });
+        expect(response.statusCode).toBe(200);
+        const items = response.json().items as Array<{ tags: Array<{ name: string }> }>;
+        expect(items).toHaveLength(3);
+        expect(items.filter((item) => item.tags.length === 0)).toHaveLength(1);
+        expect(
+          items.filter((item) => item.tags.length === 2).map((item) => item.tags.map((tag) => tag.name))
+        ).toEqual([
+          ['批量 A', '批量 B'],
+          ['批量 A', '批量 B']
+        ]);
+        expect(
+          prepare.mock.calls.filter(([sql]) => sql.includes('FROM tags t JOIN report_item_tags'))
+        ).toHaveLength(1);
+      }
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+  it('uses a dedicated development identity even with an older real account', async () => {
+    const session = sqlite.prepare('SELECT user_id FROM sessions LIMIT 1').get() as { user_id: string };
+    expect(session.user_id).not.toBe('existing-real-user');
+    expect(
+      sqlite.prepare("SELECT user_id FROM auth_accounts WHERE provider='dev' AND subject='dev-owner'").get()
+    ).toEqual(session);
+    await app.inject({ method: 'GET', url: '/auth/dev' });
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM auth_accounts WHERE provider='dev'").get()).toEqual({
+      count: 1
+    });
+  });
+
+  it('only refreshes session activity after the throttle interval', async () => {
+    const recent = new Date(Date.now() - 60_000).toISOString();
+    sqlite.prepare('UPDATE sessions SET last_seen_at=?').run(recent);
+    await app.inject({ method: 'GET', url: '/api/settings', headers: headers() });
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS count FROM sessions WHERE last_seen_at<>?').get(recent)
+    ).toEqual({ count: 0 });
+    const stale = new Date(Date.now() - 11 * 60_000).toISOString();
+    sqlite.prepare('UPDATE sessions SET last_seen_at=?').run(stale);
+    await app.inject({ method: 'GET', url: '/api/settings', headers: headers() });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM sessions WHERE last_seen_at>?').get(stale)).toEqual({
+      count: 1
+    });
+  });
+  it('preserves colors and tags omitted from partial updates', async () => {
+    const project = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: headers(),
+      payload: { name: 'PATCH 保留颜色', color: '#123456' }
+    });
+    expect(project.statusCode).toBe(201);
+    const projectId = project.json().id;
+    for (const payload of [{ name: 'PATCH 改名' }, { archived: true }]) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/projects/${projectId}`,
+        headers: headers(),
+        payload
+      });
+      expect(response.statusCode).toBe(200);
+      expect(sqlite.prepare('SELECT color FROM projects WHERE id=?').get(projectId)).toEqual({
+        color: '#123456'
+      });
+    }
+    const tag = await app.inject({
+      method: 'POST',
+      url: '/api/tags',
+      headers: headers(),
+      payload: { name: 'PATCH 保留标签', color: '#654321' }
+    });
+    expect(tag.statusCode).toBe(201);
+    const tagId = tag.json().id;
+    expect(
+      (
+        await app.inject({
+          method: 'PATCH',
+          url: `/api/tags/${tagId}`,
+          headers: headers(),
+          payload: { name: 'PATCH 标签改名' }
+        })
+      ).statusCode
+    ).toBe(200);
+    expect(sqlite.prepare('SELECT color FROM tags WHERE id=?').get(tagId)).toEqual({ color: '#654321' });
+    const report = await app.inject({
+      method: 'PUT',
+      url: '/api/reports/2041/1',
+      headers: headers(),
+      payload: {}
+    });
+    expect(report.statusCode).toBe(200);
+    const item = await app.inject({
+      method: 'POST',
+      url: `/api/reports/${report.json().id}/items`,
+      headers: headers(),
+      payload: { type: 'completed', contentMd: '原文', tagIds: [tagId] }
+    });
+    expect(item.statusCode).toBe(201);
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers(),
+      payload: { contentMd: '修改正文', expectedVersion: item.json().version }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().tags.map((entry: { id: string }) => entry.id)).toEqual([tagId]);
+    const cleared = await app.inject({
+      method: 'PATCH',
+      url: `/api/report-items/${item.json().id}`,
+      headers: headers(),
+      payload: { tagIds: [], expectedVersion: updated.json().version }
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().tags).toEqual([]);
+  });
   it('excludes blank placeholders and keeps search pagination stable', async () => {
     const report = await app.inject({
       method: 'PUT',
@@ -568,6 +879,18 @@ describe('authenticated weekly report workflow', () => {
     const attachment = await app.inject({ method: 'GET', url: uploaded.json().url, headers: { cookie } });
     expect(attachment.statusCode).toBe(200);
     expect(attachment.headers['content-type']).toContain('image/png');
+    const portableExport = await app.inject({
+      method: 'GET',
+      url: '/api/settings/export?includeFiles=true',
+      headers: headers()
+    });
+    expect(portableExport.statusCode).toBe(200);
+    expect(portableExport.json().filesIncluded).toBe(true);
+    const exportedImage = portableExport
+      .json()
+      .files.find((file: { sourceUrl: string }) => file.sourceUrl === uploaded.json().url);
+    expect(exportedImage).toBeDefined();
+    expect(Buffer.from(exportedImage.content, 'base64')).toEqual(attachment.rawPayload);
     const backupResponse = await app.inject({
       method: 'POST',
       url: '/api/settings/backup',
@@ -593,9 +916,39 @@ describe('authenticated weekly report workflow', () => {
       .get(uploaded.json().id) as { storedName: string };
     const storedPath = path.join(process.env.UPLOAD_DIR!, stored.storedName);
     const heldPath = `${storedPath}.held`;
+    const { withStorageLock } = await import('./services/storage.js');
+    const originalCopy = fs.promises.cp.bind(fs.promises);
+    const copy = vi.spyOn(fs.promises, 'cp').mockImplementation(async (source, destination, options) => {
+      // Copying must run outside the lock, and pinned files must survive deletion.
+      await withStorageLock(async () => fs.promises.rename(storedPath, heldPath));
+      try {
+        await originalCopy(source, destination, options);
+      } finally {
+        await fs.promises.rename(heldPath, storedPath);
+      }
+    });
+    try {
+      const concurrentBackup = await createBackup();
+      expect(fs.readFileSync(path.join(concurrentBackup, 'uploads', stored.storedName))).toEqual(
+        fs.readFileSync(storedPath)
+      );
+      expect(copy).toHaveBeenCalledOnce();
+    } finally {
+      copy.mockRestore();
+    }
+    expect(fs.readdirSync(process.env.UPLOAD_DIR!).some((entry) => entry.startsWith('.backup-pins-'))).toBe(
+      false
+    );
     fs.renameSync(storedPath, heldPath);
     try {
       await expect(createBackup()).rejects.toThrow('BACKUP_FILES_MISSING');
+      const incompleteExport = await app.inject({
+        method: 'GET',
+        url: '/api/settings/export?includeFiles=true',
+        headers: headers()
+      });
+      expect(incompleteExport.statusCode).toBe(409);
+      expect(incompleteExport.json().error).toBe('EXPORT_FILE_MISSING');
     } finally {
       fs.renameSync(heldPath, storedPath);
     }
@@ -1273,9 +1626,24 @@ describe('authenticated weekly report workflow', () => {
       method: 'POST',
       url: '/api/categories/reorder',
       headers: headers(),
-      payload: { ids: [operationsId, developmentId, clientCategoryId] }
+      payload: {
+        ids: [operationsId, clientCategoryId, developmentId],
+        expectedIds: (await app.inject({ method: 'GET', url: '/api/categories', headers: headers() }))
+          .json()
+          .categories.map((category: { id: string }) => category.id)
+      }
     });
     expect(reordered.statusCode).toBe(200);
+    const staleCategoryOrder = await app.inject({
+      method: 'POST',
+      url: '/api/categories/reorder',
+      headers: headers(),
+      payload: {
+        ids: [developmentId, clientCategoryId, operationsId],
+        expectedIds: [developmentId, clientCategoryId, operationsId]
+      }
+    });
+    expect(staleCategoryOrder.statusCode).toBe(409);
     const categoryList = await app.inject({ method: 'GET', url: '/api/categories', headers: headers() });
     expect(categoryList.json().categories).toEqual(
       expect.arrayContaining([

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDays,
+  formatDate,
   attachmentImageWidth,
   hasMarkdownImage,
   isoWeekForDate,
@@ -12,6 +13,10 @@ import {
 } from './lib';
 
 describe('weekly date helpers', () => {
+  it('formats calendar dates without shifting to the previous day', () => {
+    expect(formatDate('2026-09-25')).toBe('09/25');
+    expect(formatDate('2026-01-01')).toBe('01/01');
+  });
   it('handles ISO week-year boundaries', () => {
     expect(isoWeekForDate('2021-01-01')).toEqual({ year: 2020, week: 53 });
     expect(weeksInIsoYear(2020)).toBe(53);

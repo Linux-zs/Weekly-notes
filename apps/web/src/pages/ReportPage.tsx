@@ -41,11 +41,13 @@ import {
   RefreshCcw,
   Trash2
 } from 'lucide-react';
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, ApiError } from '../api';
-import { DetailEditor } from '../DetailEditor';
-import { DetailEditorModel } from '../detail-editor-model';
+import type { DetailEditorModel } from '../detail-editor-model';
+const LazyDetailEditor = lazy(() =>
+  import('../DetailEditor').then((module) => ({ default: module.ReportDetailEditor }))
+);
 import { ErrorState, Loading, Modal, TagField } from '../components';
 import { createDeferredAction } from '../deferred-action';
 import { createLatestTaskQueue } from '../latest-task-queue';
@@ -67,7 +69,8 @@ import {
   sectionLabels,
   setAttachmentImageWidth,
   stripMarkdownImages,
-  todayInTimezone
+  todayInTimezone,
+  weeksInIsoYear
 } from '../lib';
 
 const sections: ReportItemType[] = ['completed', 'next_plan'];
@@ -198,6 +201,27 @@ export function reportWithLatestDrafts(
 }
 
 export function ReportPage({ user }: { user: User }) {
+  const params = useParams();
+  if (params.year !== undefined || params.week !== undefined) {
+    const year = Number(params.year);
+    const week = Number(params.week);
+    if (
+      !/^\d{4}$/.test(params.year ?? '') ||
+      !/^\d{1,2}$/.test(params.week ?? '') ||
+      !Number.isInteger(year) ||
+      year < 2000 ||
+      year > 2200 ||
+      !Number.isInteger(week) ||
+      week < 1 ||
+      week > weeksInIsoYear(year)
+    ) {
+      return <Navigate to="/" replace />;
+    }
+  }
+  return <ValidReportPage user={user} />;
+}
+
+function ValidReportPage({ user }: { user: User }) {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedItemId = searchParams.get('item');
@@ -331,17 +355,17 @@ export function ReportPage({ user }: { user: User }) {
     }
   });
 
-  if (report.isLoading || reportWeeks.isLoading || projects.isLoading || categories.isLoading)
+  if (report.isLoading || projects.isLoading || categories.isLoading)
     return (
       <PageFrame title="周报">
         <Loading />
       </PageFrame>
     );
-  if (report.error || reportWeeks.error || projects.error || categories.error)
+  if (report.error || projects.error || categories.error)
     return (
       <PageFrame title="周报">
         <ErrorState
-          message={(report.error ?? reportWeeks.error ?? projects.error ?? categories.error)!.message}
+          message={(report.error ?? projects.error ?? categories.error)!.message}
           onRetry={() => {
             report.refetch();
             reportWeeks.refetch();
@@ -445,7 +469,9 @@ export function ReportPage({ user }: { user: User }) {
                 year={year}
                 selectedWeek={week}
                 current={current}
-                weeks={reportWeeks.data!.weeks}
+                weeks={reportWeeks.data?.weeks ?? []}
+                contentStatus={reportWeeks.isError ? 'error' : reportWeeks.isLoading ? 'loading' : 'ready'}
+                onRetry={() => reportWeeks.refetch()}
                 onSelect={(target) =>
                   navigate(target === current.week && year === current.year ? '/' : `/week/${year}/${target}`)
                 }
@@ -2034,9 +2060,8 @@ function ReportItemRow({
     preview: setFullscreenImage
   };
   if (editorModel.current) editorModel.current.callbacks = editorCallbacks;
-  const getEditorModel = () => {
-    if (!editorModel.current)
-      editorModel.current = new DetailEditorModel(latestDraft.current.contentMd, editorCallbacks);
+  const getEditorModel = (Model: typeof DetailEditorModel) => {
+    if (!editorModel.current) editorModel.current = new Model(latestDraft.current.contentMd, editorCallbacks);
     return editorModel.current;
   };
   useEffect(() => {
@@ -2291,7 +2316,9 @@ function ReportItemRow({
               />
             </label>
           </div>
-          <DetailEditor getModel={getEditorModel} />
+          <Suspense fallback={<Loading />}>
+            <LazyDetailEditor getModel={getEditorModel} />
+          </Suspense>
           <div className="attachment-panel">
             <div className="attachment-panel-heading">
               <strong>附件</strong>

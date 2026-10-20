@@ -5,6 +5,30 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WeekNavigator } from './WeekNavigator';
 afterEach(cleanup);
 describe('glass week picker', () => {
+  it('navigates rows and clamps keyboard focus at year boundaries', async () => {
+    render(
+      <WeekNavigator
+        year={2026}
+        selectedWeek={42}
+        current={{ year: 2026, week: 42 }}
+        weeks={[]}
+        onSelect={vi.fn()}
+      />
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /选择周次/ }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement?.textContent).toBe('49');
+    await user.keyboard('{ArrowRight}{ArrowDown}');
+    expect(document.activeElement?.textContent).toBe('53');
+    await user.keyboard('{Home}');
+    expect(document.activeElement?.textContent).toBe('50');
+    await user.keyboard('{Control>}{Home}{/Control}{ArrowLeft}');
+    expect(document.activeElement?.textContent).toBe('1');
+    expect(
+      screen.getAllByRole('button', { name: /^第 / }).filter((button) => button.tabIndex === 0)
+    ).toHaveLength(1);
+  });
   it.each([
     [2026, 53],
     [2025, 52]
@@ -54,6 +78,8 @@ describe('glass week picker', () => {
     await user.keyboard('{Tab}');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '关闭周次选择' }));
     await user.keyboard('{Tab}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '第 53 周，暂无周报内容' }));
+    await user.keyboard('{Control>}{Home}{/Control}');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '第 1 周，暂无周报内容' }));
     await user.keyboard('{Enter}');
     expect(onSelect).toHaveBeenCalledWith(1);

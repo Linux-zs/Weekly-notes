@@ -7,6 +7,8 @@ import { id, now, sqlite } from './db/index.js';
 import type { AuthProvider } from '@zhoubao/shared';
 import { z } from 'zod';
 
+import { authFlowCookieOptions } from './auth-cookie.js';
+
 const FLOW_COOKIE = 'zhoubao_auth_flow';
 const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const randomToken = () => crypto.randomBytes(32).toString('base64url');
@@ -145,7 +147,7 @@ export function ensureWorkspaceForUser(userId: string) {
   return membership.workspaceId;
 }
 
-function createPersonalUser(identity: Identity, provider: AuthProvider) {
+function createPersonalUser(identity: Identity, provider: AuthProvider | 'dev') {
   const userId = id();
   const workspaceId = id();
   const timestamp = now();
@@ -387,7 +389,7 @@ export async function registerAuth(app: FastifyInstance) {
     if (!raw) return;
     let row = sqlite
       .prepare(
-        `SELECT u.id,u.display_name,u.email,u.avatar_url,u.timezone,wm.workspace_id,wm.role
+        `SELECT u.id,u.display_name,u.email,u.avatar_url,u.timezone,wm.workspace_id,wm.role,s.last_seen_at
       FROM sessions s JOIN users u ON u.id=s.user_id JOIN workspace_members wm ON wm.user_id=u.id AND wm.workspace_id=COALESCE(s.workspace_id,(SELECT workspace_id FROM workspace_members WHERE user_id=u.id ORDER BY created_at LIMIT 1))
       WHERE s.token_hash=? AND s.expires_at>? ORDER BY wm.created_at LIMIT 1`
       )
@@ -400,12 +402,13 @@ export async function registerAuth(app: FastifyInstance) {
           timezone: string;
           workspace_id: string;
           role: 'owner' | 'member';
+          last_seen_at: string;
         }
       | undefined;
     if (!row) {
       const sessionUser = sqlite
         .prepare(
-          `SELECT u.id,u.display_name,u.email,u.avatar_url,u.timezone
+          `SELECT u.id,u.display_name,u.email,u.avatar_url,u.timezone,s.last_seen_at
            FROM sessions s JOIN users u ON u.id=s.user_id
            WHERE s.token_hash=? AND s.expires_at>?`
         )
@@ -416,6 +419,7 @@ export async function registerAuth(app: FastifyInstance) {
             email: string | null;
             avatar_url: string | null;
             timezone: string;
+            last_seen_at: string;
           }
         | undefined;
       if (sessionUser) {
@@ -437,7 +441,12 @@ export async function registerAuth(app: FastifyInstance) {
       workspaceId: row.workspace_id,
       role: row.role
     };
-    sqlite.prepare('UPDATE sessions SET last_seen_at=? WHERE token_hash=?').run(now(), sha256(raw));
+    const seenBefore = new Date(Date.now() - 10 * 60_000).toISOString();
+    if (row.last_seen_at < seenBefore) {
+      sqlite
+        .prepare('UPDATE sessions SET last_seen_at=? WHERE token_hash=? AND last_seen_at<?')
+        .run(now(), sha256(raw), seenBefore);
+    }
   });
 
   app.get('/api/auth/providers', async () => ({
@@ -485,7 +494,7 @@ export async function registerAuth(app: FastifyInstance) {
           const identity = await resolveIdentity(provider, flow, request);
           const result = finishIdentity(identity, provider, flow, reply);
           sqlite.prepare('DELETE FROM auth_flows WHERE id=?').run(flow.id);
-          reply.clearCookie(FLOW_COOKIE, cookieOptions('/auth'));
+          reply.clearCookie(FLOW_COOKIE, authFlowCookieOptions(provider, config.isProduction));
           return reply.redirect(
             result.invitationVerificationRequired
               ? '/settings?invite=verification_required'
@@ -528,8 +537,9 @@ export async function registerAuth(app: FastifyInstance) {
 
   app.get('/auth/dev', async (_request, reply) => {
     if (!config.devAuthBypass || config.isProduction) return reply.code(404).send();
-    let user = sqlite.prepare('SELECT id FROM users ORDER BY created_at LIMIT 1').get() as
-      { id: string } | undefined;
+    let user = sqlite
+      .prepare("SELECT user_id AS id FROM auth_accounts WHERE provider='dev' AND subject='dev-owner'")
+      .get() as { id: string } | undefined;
     if (!user)
       user = {
         id: createPersonalUser(
@@ -540,7 +550,7 @@ export async function registerAuth(app: FastifyInstance) {
             displayName: '周报主人',
             avatarUrl: null
           },
-          'google'
+          'dev'
         )
       };
     createSession(reply, user.id);
@@ -567,7 +577,10 @@ async function startFlow(request: FastifyRequest, reply: FastifyReply, link: boo
       'INSERT INTO auth_flows(id,provider,state,verifier,nonce,link_user_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)'
     )
     .run(flow.id, provider, flow.state, flow.verifier, flow.nonce, flow.link_user_id, flow.expires_at, now());
-  reply.setCookie(FLOW_COOKIE, flow.id, { ...cookieOptions('/auth'), maxAge: 600 });
+  reply.setCookie(FLOW_COOKIE, flow.id, {
+    ...authFlowCookieOptions(provider, config.isProduction),
+    maxAge: 600
+  });
   if (provider === 'github') {
     const url = new URL('https://github.com/login/oauth/authorize');
     url.search = new URLSearchParams({

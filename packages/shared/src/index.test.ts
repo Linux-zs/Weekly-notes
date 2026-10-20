@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { reportItemInputSchema } from './index.js';
+import { projectPatchSchema, reportItemInputSchema, reportItemPatchSchema } from './index.js';
 
 describe('report item input', () => {
+  it('preserves omitted fields in patches and accepts explicit tag clearing', () => {
+    expect(projectPatchSchema.parse({ name: '改名' })).toEqual({ name: '改名' });
+    expect(projectPatchSchema.parse({})).toEqual({});
+    expect(reportItemPatchSchema.parse({ contentMd: '正文' })).toEqual({ contentMd: '正文' });
+    expect(reportItemPatchSchema.parse({ tagIds: [] })).toEqual({ tagIds: [] });
+  });
   it('accepts persisted progress and notes', () => {
     expect(
       reportItemInputSchema.parse({

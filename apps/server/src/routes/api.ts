@@ -5,6 +5,7 @@ import {
   projectInputSchema,
   reportCategoryInputSchema,
   reportItemInputSchema,
+  reportItemPatchSchema,
   reportItemTypes
 } from '@zhoubao/shared';
 import type { ReportItemProgress, ReportItemType } from '@zhoubao/shared';
@@ -112,7 +113,26 @@ function loadTagsFor(itemId: string) {
     .all(itemId);
 }
 
-function serializeReportItem(row: ReportItemRow) {
+function loadTagsForItems(itemIds: string[]) {
+  const result = new Map<string, ReturnType<typeof loadTagsFor>>();
+  // Bound placeholders for SQLite builds with lower variable limits.
+  for (let offset = 0; offset < itemIds.length; offset += 500) {
+    const chunk = itemIds.slice(offset, offset + 500);
+    const rows = sqlite
+      .prepare(
+        `SELECT x.report_item_id AS itemId,t.id,t.name,t.color FROM tags t JOIN report_item_tags x ON x.tag_id=t.id WHERE x.report_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY t.name COLLATE NOCASE`
+      )
+      .all(...chunk) as Array<{ itemId: string; id: string; name: string; color: string }>;
+    for (const { itemId, ...tag } of rows) {
+      const tags = result.get(itemId) ?? [];
+      tags.push(tag);
+      result.set(itemId, tags);
+    }
+  }
+  return result;
+}
+
+function serializeReportItem(row: ReportItemRow, tags = loadTagsFor(row.id)) {
   return {
     id: row.id,
     reportId: row.reportId ?? row.report_id,
@@ -126,7 +146,7 @@ function serializeReportItem(row: ReportItemRow) {
     note: row.note ?? '',
     position: row.position,
     version: row.version,
-    tags: loadTagsFor(row.id)
+    tags
   };
 }
 
@@ -197,15 +217,15 @@ function serializeReport(user: CurrentUser, weekYear: number, weekNumber: number
       'SELECT * FROM weekly_reports WHERE workspace_id=? AND author_id=? AND week_year=? AND week_number=?'
     )
     .get(user.workspaceId, user.id, weekYear, weekNumber) as WeeklyReportRow | undefined;
-  const items = report
-    ? (
-        sqlite
-          .prepare(
-            `SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE report_id=? ORDER BY type,position,created_at`
-          )
-          .all(report.id) as ReportItemRow[]
-      ).map(serializeReportItem)
+  const rows = report
+    ? (sqlite
+        .prepare(
+          `SELECT id,report_id AS reportId,imported_from_item_id AS importedFromItemId,project_id AS projectId,category_id AS categoryId,type,content_md AS contentMd,occurred_on AS occurredOn,progress,note,position,version FROM report_items WHERE report_id=? ORDER BY type,position,created_at`
+        )
+        .all(report.id) as ReportItemRow[])
     : [];
+  const tags = loadTagsForItems(rows.map((row) => row.id));
+  const items = rows.map((row) => serializeReportItem(row, tags.get(row.id) ?? []));
   const calendarDays = sqlite
     .prepare('SELECT date,kind,name FROM calendar_days WHERE date BETWEEN ? AND ? ORDER BY date')
     .all(range.weekStart, range.weekEnd);
@@ -633,7 +653,7 @@ export async function registerApi(app: FastifyInstance) {
   });
   app.patch('/api/report-items/:id', { preHandler: requireUser }, async (request, reply) => {
     const { id: itemId } = uuidParam.parse(request.params);
-    const body = reportItemInputSchema.partial().merge(expectedVersion).parse(request.body);
+    const body = reportItemPatchSchema.merge(expectedVersion).parse(request.body);
     const user = request.currentUser!;
     const current = sqlite
       .prepare(
@@ -1046,8 +1066,10 @@ export async function registerApi(app: FastifyInstance) {
         `SELECT ri.id,ri.content_md AS contentMd,ri.type,ri.project_id AS projectId,ri.occurred_on AS occurredOn,wr.week_year AS weekYear,wr.week_number AS weekNumber,wr.week_start AS weekStart,p.name AS projectName,p.color AS projectColor FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id LEFT JOIN projects p ON p.id=ri.project_id WHERE ${where.join(' AND ')} ORDER BY wr.week_start DESC,ri.type,ri.position,ri.created_at,ri.id LIMIT 21 OFFSET ?`
       )
       .all(...args, (q.page - 1) * 20) as SearchResultRow[];
+    const pageItems = rows.slice(0, 20);
+    const tagsByItem = loadTagsForItems(pageItems.map((row) => row.id));
     return {
-      items: rows.slice(0, 20).map((row) => ({ ...row, tags: loadTagsFor(row.id) })),
+      items: pageItems.map((row) => ({ ...row, tags: tagsByItem.get(row.id) ?? [] })),
       page: q.page,
       hasMore: rows.length > 20
     };

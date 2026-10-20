@@ -9,6 +9,7 @@ import { detectImage } from '../lib/image.js';
 import { requireUser } from '../types.js';
 import { ensureWorkspaceForUser } from '../auth.js';
 import { removeStoredFile, withStorageLock } from '../services/storage.js';
+import { registerDepartedReports } from './departed-reports.js';
 
 function validateTimezone(value: string) {
   try {
@@ -35,6 +36,7 @@ function localAvatarPath(avatarUrl: string | null) {
 }
 
 export async function registerSettings(app: FastifyInstance) {
+  await registerDepartedReports(app);
   app.get('/api/settings', { preHandler: requireUser }, async (request) => {
     const user = request.currentUser!;
     const profile = sqlite
@@ -188,21 +190,30 @@ export async function registerSettings(app: FastifyInstance) {
       )
       .get(user.workspaceId, email);
     if (member) return reply.code(409).send({ error: 'ALREADY_MEMBER', message: '该邮箱已经是空间成员' });
-    const existing = sqlite
-      .prepare("SELECT id FROM workspace_invitations WHERE workspace_id=? AND email=? AND status='pending'")
-      .get(user.workspaceId, email);
-    if (existing) return reply.code(409).send({ error: 'ALREADY_INVITED', message: '该邮箱已有待接受邀请' });
     const invitationId = crypto.randomUUID();
     const timestamp = now();
     const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
-    sqlite
-      .prepare(
-        'INSERT INTO workspace_invitations(id,workspace_id,email,role,status,invited_by,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)'
-      )
-      .run(invitationId, user.workspaceId, email, 'member', 'pending', user.id, expiresAt, timestamp);
-    sqlite
-      .prepare("UPDATE workspaces SET type='team',updated_at=? WHERE id=?")
-      .run(timestamp, user.workspaceId);
+    const created = sqlite.transaction(() => {
+      sqlite
+        .prepare(
+          "UPDATE workspace_invitations SET status='revoked' WHERE workspace_id=? AND email=? AND status='pending' AND expires_at<=?"
+        )
+        .run(user.workspaceId, email, timestamp);
+      const existing = sqlite
+        .prepare("SELECT id FROM workspace_invitations WHERE workspace_id=? AND email=? AND status='pending'")
+        .get(user.workspaceId, email);
+      if (existing) return false;
+      sqlite
+        .prepare(
+          'INSERT INTO workspace_invitations(id,workspace_id,email,role,status,invited_by,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)'
+        )
+        .run(invitationId, user.workspaceId, email, 'member', 'pending', user.id, expiresAt, timestamp);
+      sqlite
+        .prepare("UPDATE workspaces SET type='team',updated_at=? WHERE id=?")
+        .run(timestamp, user.workspaceId);
+      return true;
+    })();
+    if (!created) return reply.code(409).send({ error: 'ALREADY_INVITED', message: '该邮箱已有待接受邀请' });
     return reply.code(201).send({ id: invitationId, email, role: 'member', expiresAt, createdAt: timestamp });
   });
   app.delete('/api/settings/invitations/:id', { preHandler: requireUser }, async (request, reply) => {
@@ -239,61 +250,116 @@ export async function registerSettings(app: FastifyInstance) {
     return reply.code(204).send();
   });
   app.get('/api/settings/export', { preHandler: requireUser }, async (request, reply) => {
-    const user = request.currentUser!;
-    const workspaceId = user.workspaceId;
-    const reportItems = sqlite
-      .prepare(
-        'SELECT ri.id,ri.report_id AS reportId,ri.imported_from_item_id AS importedFromItemId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
-      )
-      .all(workspaceId, user.id) as Array<Record<string, unknown> & { id: string }>;
-    const tagRows = sqlite
-      .prepare(
-        'SELECT rit.report_item_id AS reportItemId,rit.tag_id AS tagId FROM report_item_tags rit JOIN report_items ri ON ri.id=rit.report_item_id JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=? ORDER BY rit.report_item_id,rit.tag_id'
-      )
-      .all(workspaceId, user.id) as Array<{ reportItemId: string; tagId: string }>;
-    const tagIdsByItem = new Map<string, string[]>();
-    tagRows.forEach((row) => {
-      const ids = tagIdsByItem.get(row.reportItemId) ?? [];
-      ids.push(row.tagId);
-      tagIdsByItem.set(row.reportItemId, ids);
+    const { includeFiles } = z
+      .object({ includeFiles: z.enum(['true', 'false']).default('false') })
+      .parse(request.query);
+    return withStorageLock(async () => {
+      const user = request.currentUser!;
+      const workspaceId = user.workspaceId;
+      const reportItems = sqlite
+        .prepare(
+          'SELECT ri.id,ri.report_id AS reportId,ri.imported_from_item_id AS importedFromItemId,ri.project_id AS projectId,ri.category_id AS categoryId,ri.type,ri.content_md AS contentMd,ri.occurred_on AS occurredOn,ri.progress,ri.note,ri.position,ri.created_at AS createdAt,ri.updated_at AS updatedAt FROM report_items ri JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=?'
+        )
+        .all(workspaceId, user.id) as Array<Record<string, unknown> & { id: string }>;
+      const tagRows = sqlite
+        .prepare(
+          'SELECT rit.report_item_id AS reportItemId,rit.tag_id AS tagId FROM report_item_tags rit JOIN report_items ri ON ri.id=rit.report_item_id JOIN weekly_reports wr ON wr.id=ri.report_id WHERE wr.workspace_id=? AND wr.author_id=? ORDER BY rit.report_item_id,rit.tag_id'
+        )
+        .all(workspaceId, user.id) as Array<{ reportItemId: string; tagId: string }>;
+      const tagIdsByItem = new Map<string, string[]>();
+      tagRows.forEach((row) => {
+        const ids = tagIdsByItem.get(row.reportItemId) ?? [];
+        ids.push(row.tagId);
+        tagIdsByItem.set(row.reportItemId, ids);
+      });
+      const payload = {
+        exportedAt: now(),
+        profile: sqlite
+          .prepare(
+            'SELECT id,display_name AS displayName,email,timezone,avatar_url AS avatarUrl,created_at AS createdAt FROM users WHERE id=?'
+          )
+          .get(user.id),
+        workspace: sqlite
+          .prepare('SELECT id,name,type,created_at AS createdAt FROM workspaces WHERE id=?')
+          .get(workspaceId),
+        projects: sqlite
+          .prepare(
+            'SELECT id,name,color,position,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM projects WHERE workspace_id=?'
+          )
+          .all(workspaceId),
+        tags: sqlite.prepare('SELECT id,name,color FROM tags WHERE workspace_id=?').all(workspaceId),
+        categories: sqlite
+          .prepare(
+            'SELECT id,name,position,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM report_categories WHERE workspace_id=?'
+          )
+          .all(workspaceId),
+        reports: sqlite
+          .prepare(
+            'SELECT id,week_year AS weekYear,week_number AS weekNumber,week_start AS weekStart,week_end AS weekEnd,created_at AS createdAt,updated_at AS updatedAt FROM weekly_reports WHERE workspace_id=? AND author_id=?'
+          )
+          .all(workspaceId, user.id),
+        reportItems: reportItems.map((item) => ({ ...item, tagIds: tagIdsByItem.get(item.id) ?? [] })),
+        attachments: sqlite
+          .prepare(
+            'SELECT id,report_item_id AS reportItemId,original_name AS originalName,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM report_attachments WHERE workspace_id=? AND author_id=?'
+          )
+          .all(workspaceId, user.id)
+      };
+      // File contents and stable source URLs make the structured export portable.
+      // Only attachments owned by this user in this workspace are included.
+      const embeddedFiles: Array<{
+        sourceUrl: string;
+        originalName: string;
+        mimeType: string;
+        encoding: 'base64';
+        content: string;
+      }> = [];
+      if (includeFiles === 'true') {
+        const attachments = sqlite
+          .prepare(
+            'SELECT id,stored_name AS storedName,original_name AS originalName,mime_type AS mimeType FROM report_attachments WHERE workspace_id=? AND author_id=?'
+          )
+          .all(workspaceId, user.id) as Array<{
+          id: string;
+          storedName: string;
+          originalName: string;
+          mimeType: string;
+        }>;
+        for (const attachment of attachments) {
+          const source = path.resolve(config.uploadDir, attachment.storedName);
+          if (!source.startsWith(path.resolve(config.uploadDir) + path.sep))
+            throw new Error('INVALID_ATTACHMENT_PATH');
+          let content: Buffer;
+          try {
+            content = await fs.promises.readFile(source);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+              return reply.code(409).send({
+                error: 'EXPORT_FILE_MISSING',
+                message: '部分附件文件缺失，无法生成完整导出，请先恢复文件后重试。'
+              });
+            throw error;
+          }
+          embeddedFiles.push({
+            sourceUrl: `/api/attachments/${attachment.id}`,
+            originalName: attachment.originalName,
+            mimeType: attachment.mimeType,
+            encoding: 'base64',
+            content: content.toString('base64')
+          });
+        }
+      }
+      const date = now().slice(0, 10);
+      return reply
+        .type('application/json; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="weekly-report-export-${date}.json"`)
+        .send(
+          JSON.stringify(
+            { ...payload, formatVersion: 2, filesIncluded: includeFiles === 'true', files: embeddedFiles },
+            null,
+            2
+          )
+        );
     });
-    const payload = {
-      exportedAt: now(),
-      profile: sqlite
-        .prepare(
-          'SELECT id,display_name AS displayName,email,timezone,avatar_url AS avatarUrl,created_at AS createdAt FROM users WHERE id=?'
-        )
-        .get(user.id),
-      workspace: sqlite
-        .prepare('SELECT id,name,type,created_at AS createdAt FROM workspaces WHERE id=?')
-        .get(workspaceId),
-      projects: sqlite
-        .prepare(
-          'SELECT id,name,color,position,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM projects WHERE workspace_id=?'
-        )
-        .all(workspaceId),
-      tags: sqlite.prepare('SELECT id,name,color FROM tags WHERE workspace_id=?').all(workspaceId),
-      categories: sqlite
-        .prepare(
-          'SELECT id,name,position,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM report_categories WHERE workspace_id=?'
-        )
-        .all(workspaceId),
-      reports: sqlite
-        .prepare(
-          'SELECT id,week_year AS weekYear,week_number AS weekNumber,week_start AS weekStart,week_end AS weekEnd,created_at AS createdAt,updated_at AS updatedAt FROM weekly_reports WHERE workspace_id=? AND author_id=?'
-        )
-        .all(workspaceId, user.id),
-      reportItems: reportItems.map((item) => ({ ...item, tagIds: tagIdsByItem.get(item.id) ?? [] })),
-      attachments: sqlite
-        .prepare(
-          'SELECT id,report_item_id AS reportItemId,original_name AS originalName,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM report_attachments WHERE workspace_id=? AND author_id=?'
-        )
-        .all(workspaceId, user.id)
-    };
-    const date = now().slice(0, 10);
-    return reply
-      .type('application/json; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="weekly-report-export-${date}.json"`)
-      .send(JSON.stringify(payload, null, 2));
   });
 }

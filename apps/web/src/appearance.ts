@@ -33,6 +33,12 @@ export function applyUiTheme(theme: UiTheme, root: ThemeRoot = document.document
   if (root.dataset.themePreference !== theme) root.dataset.themePreference = theme;
   const resolved = resolveUiTheme(theme);
   if (root.dataset.theme !== resolved) root.dataset.theme = resolved;
+  if (root === document.documentElement) {
+    document.documentElement.style.colorScheme = resolved === 'night' ? 'dark' : 'light';
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', resolved === 'night' ? '#101722' : '#f3f9ff');
+  }
 }
 
 export function saveUiTheme(
@@ -41,6 +47,7 @@ export function saveUiTheme(
   root: ThemeRoot = document.documentElement
 ) {
   applyUiTheme(theme, root);
+  if (root === document.documentElement) window.dispatchEvent(new Event('ui-theme-change'));
   try {
     storage?.setItem(UI_THEME_STORAGE_KEY, theme);
   } catch {
@@ -59,16 +66,36 @@ export function initializeUiTheme(
 
 // Keep the in-memory preference when storage is blocked; recheck on wake and across tabs.
 export function watchUiTheme() {
-  const refresh = () => applyUiTheme(normalizeUiTheme(document.documentElement.dataset.themePreference));
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === UI_THEME_STORAGE_KEY || event.key === null) applyUiTheme(readUiTheme());
+  let timer: number | undefined;
+  const refresh = () => {
+    window.clearTimeout(timer);
+    const preference = normalizeUiTheme(document.documentElement.dataset.themePreference);
+    applyUiTheme(preference);
+    if (preference !== 'auto') return;
+    const now = new Date();
+    const next = new Date(now);
+    if (now.getHours() < 7) next.setHours(7, 0, 0, 0);
+    else if (now.getHours() < 19) next.setHours(19, 0, 0, 0);
+    else {
+      next.setDate(next.getDate() + 1);
+      next.setHours(7, 0, 0, 0);
+    }
+    timer = window.setTimeout(refresh, next.getTime() - now.getTime());
   };
-  const timer = window.setInterval(refresh, 1000);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === UI_THEME_STORAGE_KEY || event.key === null) {
+      applyUiTheme(readUiTheme());
+      refresh();
+    }
+  };
+  refresh();
+  window.addEventListener('ui-theme-change', refresh);
   window.addEventListener('focus', refresh);
   document.addEventListener('visibilitychange', refresh);
   window.addEventListener('storage', onStorage);
   return () => {
-    window.clearInterval(timer);
+    window.clearTimeout(timer);
+    window.removeEventListener('ui-theme-change', refresh);
     window.removeEventListener('focus', refresh);
     document.removeEventListener('visibilitychange', refresh);
     window.removeEventListener('storage', onStorage);

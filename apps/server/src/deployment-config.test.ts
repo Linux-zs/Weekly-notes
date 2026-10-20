@@ -1,10 +1,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import Fastify from 'fastify';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 
 describe('container authentication defaults', () => {
+  it('uses the nearest proxy client instead of attacker-prepended forwarding addresses', async () => {
+    const previous = process.env.TRUST_PROXY;
+    process.env.TRUST_PROXY = 'true';
+    const { config } = await import('./config.js');
+    if (previous === undefined) delete process.env.TRUST_PROXY;
+    else process.env.TRUST_PROXY = previous;
+    const app = Fastify({ trustProxy: config.trustProxy });
+    app.get('/', (request) => ({ ip: request.ip }));
+    try {
+      const response = await app.inject({
+        url: '/',
+        headers: { 'x-forwarded-for': '198.51.100.77, 203.0.113.9' }
+      });
+      expect(response.json().ip).toBe('203.0.113.9');
+    } finally {
+      await app.close();
+    }
+  });
   it('keeps the main compose deployment in production with development login disabled', () => {
     const compose = fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8');
     const example = fs.readFileSync(path.join(root, '.env.example'), 'utf8');

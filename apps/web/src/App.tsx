@@ -61,8 +61,7 @@ export function App() {
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const center = 50;
     const resetDuration = 320;
-    const clamp = (value: number, min: number, max: number) =>
-      Math.min(Math.max(value, min), max);
+    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
     let resetFrame = 0;
     let resetTimer = 0;
@@ -141,10 +140,7 @@ export function App() {
       const animate = (now: number) => {
         const progress = clamp((now - startedAt) / resetDuration, 0, 1);
         const eased = 1 - Math.pow(1 - progress, 3);
-        setLight(
-          startX + (center - startX) * eased,
-          startY + (center - startY) * eased
-        );
+        setLight(startX + (center - startX) * eased, startY + (center - startY) * eased);
         resetFrame = progress < 1 ? requestAnimationFrame(animate) : 0;
       };
       resetFrame = requestAnimationFrame(animate);
@@ -214,9 +210,7 @@ export function App() {
       let bestDistance = Infinity;
       links.forEach((link, index) => {
         const box = link.getBoundingClientRect();
-        const distance = Math.abs(
-          box.left + box.width / 2 - barBox.left - indicatorCenter
-        );
+        const distance = Math.abs(box.left + box.width / 2 - barBox.left - indicatorCenter);
         if (distance < bestDistance) {
           bestDistance = distance;
           best = index;
@@ -250,11 +244,7 @@ export function App() {
 
       if (dragging) {
         const limits = dragLimits();
-        currentX = clamp(
-          dragStartPosition + (event.clientX - dragStartX),
-          limits.min,
-          limits.max
-        );
+        currentX = clamp(dragStartPosition + (event.clientX - dragStartX), limits.min, limits.max);
         indicator.style.setProperty('--indicator-x', `${currentX}px`);
         setActive(nearestIndex());
 
@@ -293,8 +283,7 @@ export function App() {
       previousPointerX = event.clientX;
       previousPointerTime = event.timeStamp;
       const bounds = indicator.getBoundingClientRect();
-      const grabbedIndicator =
-        event.clientX >= bounds.left && event.clientX <= bounds.right;
+      const grabbedIndicator = event.clientX >= bounds.left && event.clientX <= bounds.right;
       if (grabbedIndicator) {
         dragStartPosition = currentX;
       } else {
@@ -350,8 +339,11 @@ export function App() {
     const onAmbientMove = (event: PointerEvent) => {
       if (event.pointerType === 'touch' || bar.contains(event.target as Node)) return;
       const bounds = indicator.getBoundingClientRect();
-      const nearby = event.clientX > bounds.left - 120 && event.clientX < bounds.right + 120 &&
-        event.clientY > bounds.top - 120 && event.clientY < bounds.bottom + 120;
+      const nearby =
+        event.clientX > bounds.left - 120 &&
+        event.clientX < bounds.right + 120 &&
+        event.clientY > bounds.top - 120 &&
+        event.clientY < bounds.bottom + 120;
       if (nearby) {
         ambientLight = true;
         cancelReset();
@@ -428,9 +420,31 @@ export function App() {
     <div className="app-shell">
       <svg className="glass-filter-defs" aria-hidden="true" width="0" height="0">
         <defs>
-          <filter id="nav-glass-refraction" filterUnits="userSpaceOnUse" x="0" y="0" width="1" height="1" colorInterpolationFilters="sRGB">
-            <feImage ref={refractionMapRef} x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="lens" />
-            <feDisplacementMap in="SourceGraphic" in2="lens" scale="32" xChannelSelector="R" yChannelSelector="G" />
+          <filter
+            id="nav-glass-refraction"
+            filterUnits="userSpaceOnUse"
+            x="0"
+            y="0"
+            width="1"
+            height="1"
+            colorInterpolationFilters="sRGB"
+          >
+            <feImage
+              ref={refractionMapRef}
+              x="0"
+              y="0"
+              width="100%"
+              height="100%"
+              preserveAspectRatio="none"
+              result="lens"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="lens"
+              scale="32"
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
           </filter>
         </defs>
       </svg>
@@ -448,8 +462,7 @@ export function App() {
               className={() => {
                 const active =
                   to === '/'
-                    ? location.pathname === '/' ||
-                      location.pathname.startsWith('/week')
+                    ? location.pathname === '/' || location.pathname.startsWith('/week')
                     : location.pathname === to;
                 return active ? 'active' : '';
               }}

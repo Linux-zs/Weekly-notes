@@ -74,9 +74,11 @@ location / {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;
 }
 ```
+
+`TRUST_PROXY=true` 仅信任紧邻应用的一层反向代理。应用端口应仅由该代理访问；代理必须覆盖客户端传入的 `X-Forwarded-For`。多层代理需另行配置明确的信任边界。
 
 数据和备份分别挂载到 `runtime/data`、`runtime/backups`。每天北京时间 03:00 创建包含 SQLite 与上传图片的完整备份包，保留 30 天。
 
