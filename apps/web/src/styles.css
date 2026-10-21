@@ -293,7 +293,7 @@ html[data-theme="night"] .search-result .week-pill{background:rgba(125,157,202,.
 html[data-theme="night"] .settings-team .panel-heading select{background:var(--surface-soft);border-color:var(--line);color:var(--ink)}
 html[data-theme="night"] .invite-form .button:disabled{background:#30394b;color:#aeb8cb;border-color:#465167;opacity:.7}
 /* Continuous report grid: only the outer frame owns rounded corners. */
-:root{--report-grid-line:rgba(60,60,67,.24);--picker-fill:rgba(255,255,255,.82);--picker-hover:rgba(90,110,140,.09);--picker-selected:rgba(75,108,152,.14);--picker-ring:#39795d;--picker-dot:#647894}
+:root{--report-grid-line:rgba(60,60,67,.11);--picker-fill:rgba(255,255,255,.82);--picker-hover:rgba(90,110,140,.09);--picker-selected:rgba(75,108,152,.14);--picker-ring:#39795d;--picker-dot:#647894}
 :root[data-theme="night"]{--report-grid-line:#46536a;--picker-fill:rgba(30,39,56,.94);--picker-hover:rgba(156,180,218,.09);--picker-selected:rgba(144,177,225,.19);--picker-ring:#79bba3;--picker-dot:#a8bad4}
 html[data-theme] .project-report-group{overflow:hidden;border:1px solid var(--report-grid-line)}
 html[data-theme] .project-report-group:has(.item-dragging){overflow:visible}
