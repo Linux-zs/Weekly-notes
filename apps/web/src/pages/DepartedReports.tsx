@@ -31,7 +31,6 @@ export function DepartedReports() {
   return (
     <section className="settings-card vertical">
       <h2>已移除成员的历史周报</h2>
-      <p>历史记录继续保留在当前空间。所有者可查看原文并清理不再需要的周报，解除对共享项目的引用。</p>
       {reports.isPending ? (
         <Loading />
       ) : reports.error ? (

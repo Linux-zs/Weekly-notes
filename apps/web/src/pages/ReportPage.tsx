@@ -500,13 +500,25 @@ function ValidReportPage({ user }: { user: User }) {
         </div>
       )}
       {addMutation.error && (
-        <div className="page-action-error">添加条目失败：{addMutation.error.message}</div>
+        <div className="page-action-error" role="alert">
+          添加条目失败：{addMutation.error.message}
+        </div>
       )}
       {createProject.error && (
-        <div className="page-action-error">新增项目失败：{createProject.error.message}</div>
+        <div className="page-action-error" role="alert">
+          新增项目失败：{createProject.error.message}
+        </div>
       )}
-      {copyError && <div className="page-action-error">{copyError}</div>}
-      {detailLinkError && <div className="page-action-error">{detailLinkError}</div>}
+      {copyError && (
+        <div className="page-action-error" role="alert">
+          {copyError}
+        </div>
+      )}
+      {detailLinkError && (
+        <div className="page-action-error" role="alert">
+          {detailLinkError}
+        </div>
+      )}
       <DraftRegistryContext.Provider value={registerLiveDraft}>
         <div className="report-sections report-sections-focused">
           <ReportSection
@@ -955,7 +967,11 @@ function ReportSection({
             </button>
           </div>
         </div>
-        {reorder.error && <div className="page-action-error">排序保存失败：{reorder.error.message}</div>}
+        {reorder.error && (
+          <div className="page-action-error" role="alert">
+            排序保存失败：{reorder.error.message}
+          </div>
+        )}
         {items.length ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
             <SortableContext
@@ -983,7 +999,15 @@ function ReportSection({
             </SortableContext>
           </DndContext>
         ) : (
-          <button className="section-empty" disabled={addingItem} onClick={() => void onAdd(null, null)}>
+          <button
+            className="section-empty"
+            disabled={addingItem}
+            onClick={() =>
+              void onAdd(null, null).catch(() => {
+                /* Mutation renders the error. */
+              })
+            }
+          >
             <Plus size={18} />
             <span>{addingItem ? '添加中…' : `添加一条${sectionLabels[type]}`}</span>
           </button>
@@ -1027,7 +1051,11 @@ function ReportSection({
               ))}
             </div>
           </fieldset>
-          {projectError && <div className="form-error">{projectError}</div>}
+          {projectError && (
+            <div className="form-error" role="alert">
+              {projectError}
+            </div>
+          )}
           <div className="dialog-actions">
             <button
               type="button"
@@ -1201,7 +1229,9 @@ function ProjectReportGroup({
         {projectArchived && <small>已停用</small>}
       </div>
       {saveProjectName.error && (
-        <div className="page-action-error">项目名称保存失败：{saveProjectName.error.message}</div>
+        <div className="page-action-error" role="alert">
+          项目名称保存失败：{saveProjectName.error.message}
+        </div>
       )}
       <div className="project-group-rows">
         {group.categoryGroups.map((categoryGroup) => (
@@ -1237,7 +1267,11 @@ function ProjectReportGroup({
             <button
               className="project-row-add"
               disabled={addingItem}
-              onClick={() => void onAdd(defaultCategoryId)}
+              onClick={() =>
+                void onAdd(defaultCategoryId).catch(() => {
+                  /* Mutation renders the error. */
+                })
+              }
             >
               <Plus size={13} />
               {addingItem ? '添加中…' : '添加一条'}
@@ -1620,7 +1654,11 @@ function CategoryCreateModal({
             required
           />
         </label>
-        {error && <div className="form-error">{error}</div>}
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+          </div>
+        )}
         <div className="dialog-actions">
           <button type="button" className="button secondary" onClick={() => onOpenChange(false)}>
             取消
@@ -2092,6 +2130,7 @@ function ReportItemRow({
             }
           : old
       );
+      qc.invalidateQueries({ queryKey: ['report', report.weekYear, report.weekNumber] });
       qc.invalidateQueries({ queryKey: ['report-weeks', report.weekYear] });
     }
   });
@@ -2381,7 +2420,9 @@ function ReportItemRow({
               <small>暂无附件。点击「添加图片」，或直接粘贴截图。</small>
             )}
             {removeAttachment.error && (
-              <div className="form-error">删除附件失败：{removeAttachment.error.message}</div>
+              <div className="form-error" role="alert">
+                删除附件失败：{removeAttachment.error.message}
+              </div>
             )}
           </div>
           <div className="report-item-fields detail-meta-footer">

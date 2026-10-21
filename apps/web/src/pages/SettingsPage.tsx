@@ -29,8 +29,7 @@ const names: Record<string, string> = {
   dev: '本地开发账号',
   google: 'Google',
   microsoft: 'Microsoft',
-  github: 'GitHub',
-  apple: 'Apple'
+  github: 'GitHub'
 };
 type SettingsData = {
   profile: { displayName: string; email: string | null; timezone: string; avatarUrl: string | null };
@@ -307,21 +306,13 @@ function SettingsContent({
         <div>
           <span className="eyebrow">系统控制台</span>
           <h1>设置</h1>
-          <p>管理身份、空间、项目、标签和数据。</p>
         </div>
       </div>
       {invitationVerificationRequired && (
-        <div className="inline-alert">
+        <div className="inline-alert" role="alert">
           登录平台没有返回可信的已验证邮箱，因此暂未加入受邀空间。可以绑定另一个已验证相同邮箱的登录方式后重试。
         </div>
       )}
-      <nav className="settings-section-nav" aria-label="设置页分区">
-        <a href="#settings-profile">个人与空间</a>
-        <a href="#projects">项目与团队</a>
-        <a href="#settings-accounts">身份与数据</a>
-        <a href="#settings-categories">分类与标签</a>
-        <a href="#settings-interface">界面</a>
-      </nav>
       <div className="settings-dashboard">
         {states.settings}
         {settings && !states.settings && (
@@ -333,7 +324,6 @@ function SettingsContent({
                     <UserRound size={18} />
                     个人资料
                   </h2>
-                  <p>用于周报署名、头像与日期展示。</p>
                 </div>
               </div>
               <form
@@ -374,7 +364,11 @@ function SettingsContent({
                     />
                   </div>
                 </div>
-                {avatar.error && <div className="form-error">{avatar.error.message}</div>}
+                {avatar.error && (
+                  <div className="form-error" role="alert">
+                    {avatar.error.message}
+                  </div>
+                )}
                 <label>
                   显示名称
                   <input
@@ -392,7 +386,11 @@ function SettingsContent({
                     <option value="UTC">UTC</option>
                   </select>
                 </label>
-                {profile.error && <div className="form-error">{profile.error.message}</div>}
+                {profile.error && (
+                  <div className="form-error" role="alert">
+                    {profile.error.message}
+                  </div>
+                )}
                 <button className="button" disabled={profile.isPending}>
                   {profile.isPending ? '保存中…' : '保存个人资料'}
                 </button>
@@ -429,7 +427,11 @@ function SettingsContent({
                   <CheckCircle2 size={16} />
                   开放注册已启用；跨平台身份不会仅凭邮箱自动合并。
                 </div>
-                {workspace.error && <div className="form-error">{workspace.error.message}</div>}
+                {workspace.error && (
+                  <div className="form-error" role="alert">
+                    {workspace.error.message}
+                  </div>
+                )}
                 <button
                   className="button secondary"
                   disabled={workspace.isPending || settings.role !== 'owner'}
@@ -454,6 +456,7 @@ function SettingsContent({
               </div>
               {settings.workspaces.length > 1 && (
                 <select
+                  aria-label="切换空间"
                   value={settings.workspace.id}
                   onChange={(event) => switchWorkspace.mutate(event.target.value)}
                   disabled={switchWorkspace.isPending}
@@ -466,6 +469,11 @@ function SettingsContent({
                 </select>
               )}
             </div>
+            {switchWorkspace.error && (
+              <div className="form-error" role="alert">
+                切换空间失败：{switchWorkspace.error.message}
+              </div>
+            )}
             <div className="member-list">
               {settings.members.map((member) => (
                 <div key={member.id}>
@@ -508,7 +516,11 @@ function SettingsContent({
                 </button>
               </form>
             )}
-            {invite.error && <div className="form-error">{invite.error.message}</div>}
+            {invite.error && (
+              <div className="form-error" role="alert">
+                {invite.error.message}
+              </div>
+            )}
             {settings.invitations.length > 0 && (
               <div className="invitation-list">
                 {settings.invitations.map((item) => (
@@ -526,7 +538,11 @@ function SettingsContent({
                 ))}
               </div>
             )}
-            {revokeInvitation.error && <div className="form-error">{revokeInvitation.error.message}</div>}
+            {revokeInvitation.error && (
+              <div className="form-error" role="alert">
+                {revokeInvitation.error.message}
+              </div>
+            )}
           </section>
         )}
         {states.accounts || (
@@ -534,7 +550,6 @@ function SettingsContent({
             <div className="panel-heading">
               <div>
                 <h2>登录方式</h2>
-                <p>绑定多个身份可以避免单一平台不可用时无法登录。</p>
               </div>
             </div>
             <div className="account-list">
@@ -692,7 +707,7 @@ function SettingsContent({
               )}
             </div>
             {(archiveCategory.error || reorderCategories.error) && (
-              <div className="page-action-error">
+              <div className="page-action-error" role="alert">
                 分类操作失败：{(archiveCategory.error ?? reorderCategories.error)!.message}
               </div>
             )}
@@ -706,7 +721,6 @@ function SettingsContent({
                   <TagIcon size={18} />
                   标签管理
                 </h2>
-                <p>编辑或清理周报条目使用的标签。</p>
               </div>
               <button
                 className="button secondary compact-button"
@@ -750,7 +764,6 @@ function SettingsContent({
           </div>
           <div className="settings-body">
             <h2>界面外观</h2>
-            <p>默认使用 iOS 液态玻璃，也可选择夜间外观或按设备本地时间自动切换。</p>
             <fieldset className="theme-picker">
               <legend>主题</legend>
               <div className="theme-options">
@@ -793,7 +806,11 @@ function SettingsContent({
           description={`确认解绑 ${names[unlinkAccount.provider]}？`}
         >
           <p className="dialog-copy">解绑后将不能再使用该平台登录当前空间。</p>
-          {unlink.error && <div className="delete-error">{unlink.error.message}</div>}
+          {unlink.error && (
+            <div className="delete-error" role="alert">
+              {unlink.error.message}
+            </div>
+          )}
           <div className="dialog-actions">
             <button className="button secondary" onClick={() => setUnlinkAccount(null)}>
               取消
@@ -866,7 +883,11 @@ function SettingsContent({
               <p>确认永久删除这个标签。</p>
             </div>
           </div>
-          {deleteTag.error && <div className="delete-error">{deleteTag.error.message}</div>}
+          {deleteTag.error && (
+            <div className="delete-error" role="alert">
+              {deleteTag.error.message}
+            </div>
+          )}
           <div className="dialog-actions">
             <button className="button secondary" onClick={() => setDeleteTagTarget(null)}>
               取消
@@ -900,7 +921,9 @@ function SettingsContent({
             </div>
           </div>
           {removeWorkspaceMember.error && (
-            <div className="delete-error">{removeWorkspaceMember.error.message}</div>
+            <div className="delete-error" role="alert">
+              {removeWorkspaceMember.error.message}
+            </div>
           )}
           <div className="dialog-actions">
             <button className="button secondary" onClick={() => setRemoveMember(null)}>
@@ -959,7 +982,11 @@ function CategoryEditor({
             required
           />
         </label>
-        {error && <div className="form-error">{error}</div>}
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+          </div>
+        )}
         <div className="dialog-actions">
           <button type="button" className="button secondary" onClick={onClose} disabled={pending}>
             取消
@@ -1022,7 +1049,11 @@ function TagEditor({
             ))}
           </div>
         </fieldset>
-        {error && <div className="form-error">{error}</div>}
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+          </div>
+        )}
         <div className="dialog-actions">
           <button type="button" className="button secondary" onClick={onClose}>
             取消

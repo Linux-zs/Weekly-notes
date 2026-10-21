@@ -4,7 +4,7 @@ export const reportItemTypes = ['completed', 'next_plan', 'other'] as const;
 export type ReportItemType = (typeof reportItemTypes)[number];
 export const reportItemProgresses = ['completed', 'answered', 'incomplete'] as const;
 export type ReportItemProgress = (typeof reportItemProgresses)[number];
-export const authProviders = ['google', 'microsoft', 'github', 'apple'] as const;
+export const authProviders = ['google', 'microsoft', 'github'] as const;
 export type AuthProvider = (typeof authProviders)[number];
 export const maxReportItemTags = 20;
 

@@ -19,12 +19,7 @@ const envSchema = z.object({
   MICROSOFT_CLIENT_ID: z.string().default(''),
   MICROSOFT_CLIENT_SECRET: z.string().default(''),
   GITHUB_CLIENT_ID: z.string().default(''),
-  GITHUB_CLIENT_SECRET: z.string().default(''),
-  APPLE_ENABLED: z.enum(['true', 'false']).default('false'),
-  APPLE_CLIENT_ID: z.string().default(''),
-  APPLE_TEAM_ID: z.string().default(''),
-  APPLE_KEY_ID: z.string().default(''),
-  APPLE_PRIVATE_KEY: z.string().default('')
+  GITHUB_CLIENT_SECRET: z.string().default('')
 });
 
 const parsed = envSchema.parse(process.env);
@@ -39,7 +34,6 @@ export const config = {
   // Supported deployment has exactly one trusted reverse proxy in front of the app.
   trustProxy: parsed.TRUST_PROXY === 'true' ? 1 : false,
   devAuthBypass: parsed.DEV_AUTH_BYPASS === 'true',
-  appleEnabled: parsed.APPLE_ENABLED === 'true',
   databasePath: path.resolve(workspaceRoot, parsed.DATABASE_PATH),
   backupDir: path.resolve(workspaceRoot, parsed.BACKUP_DIR),
   uploadDir: path.resolve(workspaceRoot, parsed.UPLOAD_DIR),

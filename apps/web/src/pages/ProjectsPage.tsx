@@ -138,7 +138,6 @@ export function ProjectSettings() {
               <FolderKanban size={18} />
               项目管理
             </h2>
-            <p>维护项目颜色、显示顺序与周报归属。</p>
           </div>
           <button className="button" onClick={openCreate}>
             <Plus size={17} />

@@ -104,7 +104,6 @@ export function SearchPage() {
         <div>
           <span className="eyebrow">资料检索</span>
           <h1>搜索周报</h1>
-          <p>按项目、时间、标签和类型快速定位历史工作记录。</p>
         </div>
       </div>
       <form
@@ -142,6 +141,7 @@ export function SearchPage() {
             />
           </label>
           <select
+            aria-label="筛选项目"
             value={filters.projectId}
             onChange={(event) => setFilters({ ...filters, projectId: event.target.value })}
           >
@@ -153,6 +153,7 @@ export function SearchPage() {
             ))}
           </select>
           <select
+            aria-label="筛选类型"
             value={filters.type}
             onChange={(event) => setFilters({ ...filters, type: event.target.value })}
           >
@@ -175,7 +176,11 @@ export function SearchPage() {
             清除
           </button>
         </div>
-        {dateInvalid && <div className="form-error">开始日期不能晚于结束日期。</div>}
+        {dateInvalid && (
+          <div className="form-error" role="alert">
+            开始日期不能晚于结束日期。
+          </div>
+        )}
         {tags.data!.tags.length > 0 && (
           <div className="search-tag-row">
             <span>标签</span>
@@ -184,6 +189,7 @@ export function SearchPage() {
                 <button
                   type="button"
                   key={tag.id}
+                  aria-pressed={filters.tagIds.includes(tag.id)}
                   className={`tag-choice${filters.tagIds.includes(tag.id) ? ' selected' : ''}`}
                   onClick={() =>
                     setFilters({

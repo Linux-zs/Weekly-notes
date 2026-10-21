@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import * as oidc from 'openid-client';
-import { SignJWT, decodeJwt, importPKCS8 } from 'jose';
+import { decodeJwt } from 'jose';
 import { config } from './config.js';
 import { id, now, sqlite } from './db/index.js';
-import type { AuthProvider } from '@zhoubao/shared';
+import { authProviders, type AuthProvider } from '@zhoubao/shared';
 import { z } from 'zod';
 
 import { authFlowCookieOptions } from './auth-cookie.js';
@@ -60,18 +60,6 @@ function cookieOptions(path = '/') {
   return { path, httpOnly: true, secure: config.isProduction, sameSite: 'lax' as const };
 }
 
-async function appleSecret() {
-  const key = await importPKCS8(config.APPLE_PRIVATE_KEY.replace(/\\n/g, '\n'), 'ES256');
-  return new SignJWT({})
-    .setProtectedHeader({ alg: 'ES256', kid: config.APPLE_KEY_ID })
-    .setIssuer(config.APPLE_TEAM_ID)
-    .setSubject(config.APPLE_CLIENT_ID)
-    .setAudience('https://appleid.apple.com')
-    .setIssuedAt()
-    .setExpirationTime('180d')
-    .sign(key);
-}
-
 async function providerConfig(provider: AuthProvider) {
   if (provider === 'google')
     return oidc.discovery(
@@ -85,8 +73,6 @@ async function providerConfig(provider: AuthProvider) {
       config.MICROSOFT_CLIENT_ID,
       config.MICROSOFT_CLIENT_SECRET
     );
-  if (provider === 'apple')
-    return oidc.discovery(new URL('https://appleid.apple.com'), config.APPLE_CLIENT_ID, await appleSecret());
   throw new Error('GitHub does not expose OpenID Connect for user login');
 }
 
@@ -94,7 +80,7 @@ function enabled(provider: AuthProvider) {
   if (provider === 'google') return Boolean(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET);
   if (provider === 'microsoft') return Boolean(config.MICROSOFT_CLIENT_ID && config.MICROSOFT_CLIENT_SECRET);
   if (provider === 'github') return Boolean(config.GITHUB_CLIENT_ID && config.GITHUB_CLIENT_SECRET);
-  return config.appleEnabled && Boolean(config.APPLE_CLIENT_ID && config.APPLE_PRIVATE_KEY);
+  return false;
 }
 
 function createSession(reply: FastifyReply, userId: string, workspaceId?: string) {
@@ -273,10 +259,7 @@ async function resolveIdentity(
   flow: Flow,
   request: FastifyRequest
 ): Promise<Identity> {
-  const values = {
-    ...(request.query as Record<string, string>),
-    ...(request.body as Record<string, string>)
-  };
+  const values = request.query as Record<string, string>;
   if (provider === 'github') {
     if (values.state !== flow.state || !values.code) throw new Error('Invalid OAuth state');
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
@@ -314,7 +297,7 @@ async function resolveIdentity(
     return {
       subject: String(user.id),
       email: primary?.email ?? user.email,
-      emailVerified: Boolean(primary ?? user.email),
+      emailVerified: Boolean(primary),
       displayName: user.name ?? user.login,
       avatarUrl: user.avatar_url
     };
@@ -451,7 +434,7 @@ export async function registerAuth(app: FastifyInstance) {
 
   app.get('/api/auth/providers', async () => ({
     devAuthEnabled: config.devAuthBypass && !config.isProduction,
-    providers: (['google', 'microsoft', 'github', 'apple'] as AuthProvider[]).map((provider) => ({
+    providers: authProviders.map((provider) => ({
       provider,
       enabled: enabled(provider)
     }))
@@ -461,7 +444,7 @@ export async function registerAuth(app: FastifyInstance) {
     return {
       accounts: sqlite
         .prepare(
-          'SELECT id,provider,email,display_name AS displayName,last_login_at AS lastLoginAt FROM auth_accounts WHERE user_id=? ORDER BY created_at'
+          `SELECT id,provider,email,display_name AS displayName,last_login_at AS lastLoginAt FROM auth_accounts WHERE user_id=? AND provider IN ('google','microsoft','github','dev') ORDER BY created_at`
         )
         .all(request.currentUser.id)
     };
@@ -477,38 +460,38 @@ export async function registerAuth(app: FastifyInstance) {
     return startFlow(request, reply, true);
   });
 
-  for (const method of ['GET', 'POST'] as const) {
-    app.route({
-      method,
-      url: '/auth/:provider/callback',
-      handler: async (request, reply) => {
-        const provider = (request.params as { provider: string }).provider as AuthProvider;
-        const flowId = request.cookies[FLOW_COOKIE];
-        const flow = flowId
-          ? (sqlite.prepare('SELECT * FROM auth_flows WHERE id=? AND expires_at>?').get(flowId, now()) as
-              Flow | undefined)
-          : undefined;
-        if (!flow || flow.provider !== provider)
-          return reply.code(400).type('text/plain').send('登录流程已过期，请重新开始。');
-        try {
-          const identity = await resolveIdentity(provider, flow, request);
-          const result = finishIdentity(identity, provider, flow, reply);
-          sqlite.prepare('DELETE FROM auth_flows WHERE id=?').run(flow.id);
-          reply.clearCookie(FLOW_COOKIE, authFlowCookieOptions(provider, config.isProduction));
-          return reply.redirect(
-            result.invitationVerificationRequired
-              ? '/settings?invite=verification_required'
-              : flow.link_user_id
-                ? '/settings?linked=1'
-                : '/'
-          );
-        } catch (error) {
-          request.log.warn({ err: error, provider }, 'Authentication callback failed');
-          return reply.redirect('/login?error=access_denied');
-        }
+  app.route({
+    method: 'GET',
+    url: '/auth/:provider/callback',
+    handler: async (request, reply) => {
+      const provider = (request.params as { provider: string }).provider as AuthProvider;
+      if (!authProviders.includes(provider) || !enabled(provider))
+        return reply.code(404).send({ error: 'PROVIDER_DISABLED' });
+      const flowId = request.cookies[FLOW_COOKIE];
+      const flow = flowId
+        ? (sqlite.prepare('SELECT * FROM auth_flows WHERE id=? AND expires_at>?').get(flowId, now()) as
+            Flow | undefined)
+        : undefined;
+      if (!flow || flow.provider !== provider)
+        return reply.code(400).type('text/plain').send('登录流程已过期，请重新开始。');
+      try {
+        const identity = await resolveIdentity(provider, flow, request);
+        const result = finishIdentity(identity, provider, flow, reply);
+        sqlite.prepare('DELETE FROM auth_flows WHERE id=?').run(flow.id);
+        reply.clearCookie(FLOW_COOKIE, authFlowCookieOptions(config.isProduction));
+        return reply.redirect(
+          result.invitationVerificationRequired
+            ? '/settings?invite=verification_required'
+            : flow.link_user_id
+              ? '/settings?linked=1'
+              : '/'
+        );
+      } catch (error) {
+        request.log.warn({ err: error, provider }, 'Authentication callback failed');
+        return reply.redirect('/login?error=access_denied');
       }
-    });
-  }
+    }
+  });
 
   app.delete('/api/auth/accounts/:id', async (request, reply) => {
     if (!request.currentUser) return reply.code(401).send({ error: 'UNAUTHORIZED' });
@@ -518,7 +501,9 @@ export async function registerAuth(app: FastifyInstance) {
       .get(accountId, request.currentUser.id);
     if (!account) return reply.code(404).send({ error: 'NOT_FOUND' });
     const count = sqlite
-      .prepare('SELECT COUNT(*) AS count FROM auth_accounts WHERE user_id=?')
+      .prepare(
+        `SELECT COUNT(*) AS count FROM auth_accounts WHERE user_id=? AND provider IN ('google','microsoft','github','dev')`
+      )
       .get(request.currentUser.id) as { count: number };
     if (count.count <= 1)
       return reply.code(409).send({ error: 'LAST_ACCOUNT', message: '不能解绑最后一个登录方式' });
@@ -560,7 +545,7 @@ export async function registerAuth(app: FastifyInstance) {
 
 async function startFlow(request: FastifyRequest, reply: FastifyReply, link: boolean) {
   const provider = (request.params as { provider: string }).provider as AuthProvider;
-  if (!['google', 'microsoft', 'github', 'apple'].includes(provider) || !enabled(provider))
+  if (!authProviders.includes(provider) || !enabled(provider))
     return reply.code(404).send({ error: 'PROVIDER_DISABLED' });
   if (link && !request.currentUser) return reply.code(401).send({ error: 'UNAUTHORIZED' });
   const flow: Flow = {
@@ -578,7 +563,7 @@ async function startFlow(request: FastifyRequest, reply: FastifyReply, link: boo
     )
     .run(flow.id, provider, flow.state, flow.verifier, flow.nonce, flow.link_user_id, flow.expires_at, now());
   reply.setCookie(FLOW_COOKIE, flow.id, {
-    ...authFlowCookieOptions(provider, config.isProduction),
+    ...authFlowCookieOptions(config.isProduction),
     maxAge: 600
   });
   if (provider === 'github') {
@@ -601,6 +586,5 @@ async function startFlow(request: FastifyRequest, reply: FastifyReply, link: boo
     code_challenge: challenge,
     code_challenge_method: 'S256'
   };
-  if (provider === 'apple') params.response_mode = 'form_post';
   return reply.redirect(oidc.buildAuthorizationUrl(configuration, params).href);
 }

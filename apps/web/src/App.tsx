@@ -533,8 +533,7 @@ export function LoginPage() {
   const labels: Record<string, string> = {
     google: 'Google',
     microsoft: 'Microsoft',
-    github: 'GitHub',
-    apple: 'Apple'
+    github: 'GitHub'
   };
   const error = new URLSearchParams(location.search).get('error');
   const today = todayInTimezone(browserTimezone());
@@ -573,12 +572,18 @@ export function LoginPage() {
             <span>进入工作汇报空间</span>
           </div>
         </div>
-        {error && <div className="inline-alert">登录失败或登录流程已经过期，请重新尝试。</div>}
+        {error && (
+          <div className="inline-alert" role="alert">
+            登录失败或登录流程已经过期，请重新尝试。
+          </div>
+        )}
         <div className="provider-list">
           {providers.isLoading ? (
             <Loading />
           ) : providers.error ? (
-            <div className="inline-alert">登录方式加载失败，请稍后重试。</div>
+            <div className="inline-alert" role="alert">
+              登录方式加载失败，请稍后重试。
+            </div>
           ) : (
             providers.data?.providers
               .filter((p) => p.enabled)
@@ -603,7 +608,9 @@ export function LoginPage() {
               </a>
             </>
           ) : (
-            <div className="inline-alert">尚未配置可用的登录平台，请联系管理员完成身份平台配置。</div>
+            <div className="inline-alert" role="alert">
+              尚未配置可用的登录平台，请联系管理员完成身份平台配置。
+            </div>
           ))}
         <p className="login-note">登录即表示仅在你的授权空间内保存周报数据。</p>
       </section>

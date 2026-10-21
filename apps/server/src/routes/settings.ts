@@ -9,6 +9,7 @@ import { detectImage } from '../lib/image.js';
 import { requireUser } from '../types.js';
 import { ensureWorkspaceForUser } from '../auth.js';
 import { removeStoredFile, withStorageLock } from '../services/storage.js';
+import { prepareExport } from '../services/export.js';
 import { registerDepartedReports } from './departed-reports.js';
 
 function validateTimezone(value: string) {
@@ -253,7 +254,7 @@ export async function registerSettings(app: FastifyInstance) {
     const { includeFiles } = z
       .object({ includeFiles: z.enum(['true', 'false']).default('false') })
       .parse(request.query);
-    return withStorageLock(async () => {
+    const stream = await withStorageLock(async () => {
       const user = request.currentUser!;
       const workspaceId = user.workspaceId;
       const reportItems = sqlite
@@ -305,61 +306,36 @@ export async function registerSettings(app: FastifyInstance) {
           )
           .all(workspaceId, user.id)
       };
-      // File contents and stable source URLs make the structured export portable.
-      // Only attachments owned by this user in this workspace are included.
-      const embeddedFiles: Array<{
-        sourceUrl: string;
-        originalName: string;
-        mimeType: string;
-        encoding: 'base64';
-        content: string;
-      }> = [];
-      if (includeFiles === 'true') {
-        const attachments = sqlite
-          .prepare(
-            'SELECT id,stored_name AS storedName,original_name AS originalName,mime_type AS mimeType FROM report_attachments WHERE workspace_id=? AND author_id=?'
-          )
-          .all(workspaceId, user.id) as Array<{
-          id: string;
-          storedName: string;
-          originalName: string;
-          mimeType: string;
-        }>;
-        for (const attachment of attachments) {
-          const source = path.resolve(config.uploadDir, attachment.storedName);
-          if (!source.startsWith(path.resolve(config.uploadDir) + path.sep))
-            throw new Error('INVALID_ATTACHMENT_PATH');
-          let content: Buffer;
-          try {
-            content = await fs.promises.readFile(source);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-              return reply.code(409).send({
-                error: 'EXPORT_FILE_MISSING',
-                message: '部分附件文件缺失，无法生成完整导出，请先恢复文件后重试。'
-              });
-            throw error;
-          }
-          embeddedFiles.push({
-            sourceUrl: `/api/attachments/${attachment.id}`,
-            originalName: attachment.originalName,
-            mimeType: attachment.mimeType,
-            encoding: 'base64',
-            content: content.toString('base64')
+      const attachments =
+        includeFiles === 'true'
+          ? (sqlite
+              .prepare(
+                'SELECT id,stored_name AS storedName,original_name AS originalName,mime_type AS mimeType FROM report_attachments WHERE workspace_id=? AND author_id=?'
+              )
+              .all(workspaceId, user.id) as Array<{
+              id: string;
+              storedName: string;
+              originalName: string;
+              mimeType: string;
+            }>)
+          : [];
+      return prepareExport(config.uploadDir, payload, attachments, includeFiles === 'true');
+    }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        reply
+          .code(409)
+          .send({
+            error: 'EXPORT_FILE_MISSING',
+            message: '部分附件文件缺失，无法生成完整导出，请先恢复文件后重试。'
           });
-        }
+        return null;
       }
-      const date = now().slice(0, 10);
-      return reply
-        .type('application/json; charset=utf-8')
-        .header('Content-Disposition', `attachment; filename="weekly-report-export-${date}.json"`)
-        .send(
-          JSON.stringify(
-            { ...payload, formatVersion: 2, filesIncluded: includeFiles === 'true', files: embeddedFiles },
-            null,
-            2
-          )
-        );
+      throw error;
     });
+    if (!stream) return reply;
+    return reply
+      .type('application/json; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="weekly-report-export-${now().slice(0, 10)}.json"`)
+      .send(stream);
   });
 }

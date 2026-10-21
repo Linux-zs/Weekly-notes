@@ -6,7 +6,7 @@
 
 - React 19、TypeScript、Vite、React Router、TanStack Query、Tailwind CSS、Radix UI
 - Node.js 24、Fastify、Drizzle ORM、better-sqlite3、Zod
-- Google / Microsoft / Apple OIDC，GitHub OAuth 2.0
+- Google / Microsoft OIDC，GitHub OAuth 2.0
 - Docker Compose；由已有 Nginx/Caddy 终止 HTTPS
 
 ## 本地运行
@@ -49,15 +49,13 @@ DEV_AUTH_BYPASS=false
 https://weekly.example.com/auth/google/callback
 https://weekly.example.com/auth/microsoft/callback
 https://weekly.example.com/auth/github/callback
-https://weekly.example.com/auth/apple/callback
 ```
 
 - Google：创建 Web OAuth Client，只请求 `openid profile email`。
 - Microsoft：应用账号类型选择“任意组织目录和个人 Microsoft 账号”，服务端使用 `common`。如需按邮箱自动接受团队邀请，请在应用的 ID Token 可选声明中配置 `email`、`verified_primary_email` 和 `xms_edov`；普通 `preferred_username` 不作为邀请授权依据。
 - GitHub：创建 OAuth App，只请求 `read:user user:email`。
-- Apple：当前默认关闭。获得 Apple Developer Program 后配置 Services ID、域名、Return URL、Team ID、Key ID 和 ES256 私钥，再设置 `APPLE_ENABLED=true`。
 
-不要提交 `.env`、Apple 私钥、Client Secret、SQLite 数据库或备份文件。
+不要提交 `.env`、Client Secret、SQLite 数据库或备份文件。
 
 ## Docker 与反向代理
 
@@ -88,17 +86,18 @@ location / {
 docker compose exec -T app node apps/server/dist/scripts/backup.js
 ```
 
-恢复时先停止服务，并保留当前数据目录：
+恢复时先停止服务，确认容器已退出，再将整个当前数据目录（包括可能存在的 WAL/SHM 文件）保留到独立目录。不要将备份主库覆盖到带有旧 WAL 的目录，也不要直接删除旧 WAL：
 
 ```bash
 docker compose stop app
-cp runtime/data/zhoubao.sqlite runtime/data/zhoubao.before-restore.sqlite
+mv runtime/data "runtime/data.before-restore-$(date +%Y%m%d-%H%M%S)"
+mkdir -p runtime/data
 cp runtime/backups/zhoubao-<timestamp>/zhoubao.sqlite runtime/data/zhoubao.sqlite
-rm -rf runtime/data/uploads.before-restore
-mv runtime/data/uploads runtime/data/uploads.before-restore
 cp -r runtime/backups/zhoubao-<timestamp>/uploads runtime/data/uploads
 docker compose start app
 ```
+
+启动前检查备份的 `manifest.json`、数据库与附件是否齐全，并确认新目录权限允许容器用户读写。原数据目录在验证恢复成功前应完整保留。若修改过 Compose 的数据路径，以上路径也需对应调整。
 
 ## 节假日数据
 

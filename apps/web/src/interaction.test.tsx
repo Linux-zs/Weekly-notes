@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
@@ -663,7 +663,9 @@ describe('interactive limits and login availability', () => {
       'category-operations'
     );
     await userEvent.click(screen.getByRole('button', { name: '使用分类' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('分类添加失败，请重试');
+    expect((await within(screen.getByRole('dialog')).findByRole('alert')).textContent).toContain(
+      '分类添加失败，请重试'
+    );
     expect(screen.getByRole('dialog', { name: '添加分类 · 客户端' })).toBeTruthy();
     expect((screen.getByRole('combobox', { name: '选择已有分类' }) as HTMLSelectElement).value).toBe(
       'category-operations'

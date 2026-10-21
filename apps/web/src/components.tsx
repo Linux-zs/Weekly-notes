@@ -66,7 +66,7 @@ export function EmptyState({
 }
 export function Loading() {
   return (
-    <div className="loading-stack" aria-label="加载中">
+    <div className="loading-stack" role="status" aria-label="加载中">
       <span />
       <span />
       <span />
@@ -75,7 +75,7 @@ export function Loading() {
 }
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="error-state">
+    <div className="error-state" role="alert">
       <strong>加载失败</strong>
       <p>{message}</p>
       {onRetry && (
@@ -109,7 +109,12 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
     }
   });
   if (tags.isLoading) return <div className="tag-field-loading">正在加载标签…</div>;
-  if (tags.error) return <div className="form-error">标签加载失败：{tags.error.message}</div>;
+  if (tags.error)
+    return (
+      <div className="form-error" role="alert">
+        标签加载失败：{tags.error.message}
+      </div>
+    );
   return (
     <div className="tag-field">
       <div className="tag-field-list">
@@ -117,6 +122,7 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
           <button
             type="button"
             key={tag.id}
+            aria-pressed={value.includes(tag.id)}
             className={`tag-choice${value.includes(tag.id) ? ' selected' : ''}`}
             disabled={create.isPending || (!value.includes(tag.id) && atLimit)}
             onClick={() =>
@@ -170,7 +176,11 @@ export function TagField({ value, onChange }: { value: string[]; onChange: (ids:
           </button>
         </div>
       )}
-      {create.error && <div className="form-error">{create.error.message}</div>}
+      {create.error && (
+        <div className="form-error" role="alert">
+          {create.error.message}
+        </div>
+      )}
     </div>
   );
 }

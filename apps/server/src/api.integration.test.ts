@@ -53,6 +53,66 @@ function listFiles(root: string): string[] {
 }
 
 describe('authenticated weekly report workflow', () => {
+  it.each([false, true])('only accepts GitHub invitations with verified email=%s', async (verified) => {
+    const { config } = await import('./config.js');
+    const previous = [config.GITHUB_CLIENT_ID, config.GITHUB_CLIENT_SECRET];
+    config.GITHUB_CLIENT_ID = 'test-client';
+    config.GITHUB_CLIENT_SECRET = 'test-secret';
+    const email = `github-${verified}@example.test`;
+    const invite = await app.inject({
+      method: 'POST',
+      url: '/api/settings/invitations',
+      headers: headers(),
+      payload: { email }
+    });
+    expect(invite.statusCode).toBe(201);
+    const owner = (await app.inject({ url: '/api/me', headers: headers() })).json().user;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      const body = url.includes('access_token')
+        ? { access_token: 'token' }
+        : url.endsWith('/emails')
+          ? [{ email, primary: true, verified }]
+          : { id: verified ? 9102 : 9101, name: 'GitHub tester', login: 'tester', email, avatar_url: null };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    try {
+      const start = await app.inject({ url: '/auth/github/start' });
+      const state = new URL(start.headers.location!).searchParams.get('state');
+      const flowCookie = String(start.headers['set-cookie']).split(';')[0]!;
+      const callback = await app.inject({
+        url: `/auth/github/callback?state=${state}&code=code`,
+        headers: { cookie: flowCookie }
+      });
+      expect(callback.statusCode).toBe(302);
+      const user = sqlite
+        .prepare('SELECT user_id AS id FROM auth_accounts WHERE provider=? AND subject=?')
+        .get('github', verified ? '9102' : '9101') as { id: string };
+      const member = sqlite
+        .prepare('SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?')
+        .get(owner.workspaceId, user.id);
+      expect(Boolean(member)).toBe(verified);
+    } finally {
+      sqlite.prepare('DELETE FROM workspace_invitations WHERE email=?').run(email);
+      sqlite.prepare('DELETE FROM users WHERE email=?').run(email);
+      fetchMock.mockRestore();
+      [config.GITHUB_CLIENT_ID, config.GITHUB_CLIENT_SECRET] = previous as [string, string];
+    }
+  });
+
+  it('exposes only supported login providers and rejects removed provider routes', async () => {
+    const providers = (await app.inject({ url: '/api/auth/providers' })).json().providers;
+    expect(providers.map((entry: { provider: string }) => entry.provider)).toEqual([
+      'google',
+      'microsoft',
+      'github'
+    ]);
+    for (const route of ['start', 'callback']) {
+      expect((await app.inject({ url: `/auth/unsupported/${route}` })).statusCode).toBe(404);
+    }
+    expect((await app.inject({ method: 'POST', url: '/auth/google/callback' })).statusCode).toBe(404);
+  });
+
   it('lets owners manage departed reports without touching active members or other workspaces', async () => {
     const me = (await app.inject({ url: '/api/me', headers: headers() })).json().user;
     const memberId = crypto.randomUUID(),

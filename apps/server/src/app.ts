@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import { constants } from 'node:fs';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import formbody from '@fastify/formbody';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -38,7 +37,6 @@ export async function buildApp() {
     return reply.code(500).send({ error: 'INTERNAL_SERVER_ERROR', message: '服务器内部错误' });
   });
   await app.register(cookie);
-  await app.register(formbody);
   await app.register(multipart, { limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
   await app.register(helmet, {
     contentSecurityPolicy: {
