@@ -1353,7 +1353,7 @@ function CategoryPickerModal({
       return;
     }
     if (matchingCategory?.archivedAt) {
-      setError('该分类已停用，请到设置中恢复后使用');
+      setError('该分类已停用，请选择其他分类或使用新名称');
       return;
     }
     void perform(() =>
@@ -1431,7 +1431,7 @@ function CategoryPickerModal({
               role={matchingCategory.archivedAt ? 'alert' : 'status'}
             >
               {matchingCategory.archivedAt
-                ? '该分类已停用，请到设置中恢复后使用'
+                ? '该分类已停用，请选择其他分类或使用新名称'
                 : '已存在同名分类，提交后将直接使用。'}
             </div>
           )}

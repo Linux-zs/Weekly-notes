@@ -122,7 +122,7 @@ afterEach(() => {
 });
 
 describe('interactive limits and login availability', () => {
-  it.each(['/api/settings', '/api/auth/accounts', '/api/auth/providers', '/api/tags', '/api/categories'])(
+  it.each(['/api/settings', '/api/auth/accounts', '/api/auth/providers'])(
     'keeps local appearance and unrelated settings usable when %s fails',
     async (failedPath) => {
       mockedApi.mockImplementation((path: string) => {
@@ -156,6 +156,12 @@ describe('interactive limits and login availability', () => {
         )
       );
       expect(await screen.findByText('本区域暂不可用')).toBeTruthy();
+      for (const path of ['/api/projects', '/api/categories', '/api/tags']) {
+        expect(mockedApi.mock.calls.some(([requested]) => requested === path)).toBe(false);
+      }
+      for (const name of ['项目管理', '条目分类', '标签管理']) {
+        expect(screen.queryByRole('heading', { name })).toBeNull();
+      }
       await userEvent.click(screen.getByRole('radio', { name: /夜间玻璃/ }));
       expect(document.documentElement.dataset.theme).toBe('night');
       if (failedPath !== '/api/settings') {
@@ -636,7 +642,7 @@ describe('interactive limits and login availability', () => {
     await userEvent.click(screen.getByRole('button', { name: '添加分类' }));
     await userEvent.type(screen.getByRole('textbox', { name: '分类名称' }), '历史分类');
     expect(screen.queryByRole('option', { name: '历史分类' })).toBeNull();
-    expect(screen.getByRole('alert').textContent).toContain('该分类已停用，请到设置中恢复后使用');
+    expect(screen.getByRole('alert').textContent).toContain('该分类已停用，请选择其他分类或使用新名称');
     expect((screen.getByRole('button', { name: '使用已有分类' }) as HTMLButtonElement).disabled).toBe(true);
     expect(mutationPaths).toEqual(['/api/reports/report-34/items']);
   });

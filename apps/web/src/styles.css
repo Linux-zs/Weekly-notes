@@ -318,3 +318,17 @@ html[data-theme="night"] .week-picker-overlay{background:rgba(3,7,14,.5)}
 @media(prefers-reduced-motion:reduce){.week-picker,.week-picker-overlay{animation:none}.week-picker-day{transition:none}}
 .week-picker-trigger{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:30px;padding:4px 9px;border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);border-radius:999px;background:var(--picker-hover);color:var(--muted);font-size:11px;font-weight:650;white-space:nowrap;transition:background .15s,color .15s}.week-picker-trigger:hover,.week-picker-trigger[data-state=open]{background:var(--picker-selected);color:var(--ink)}.week-picker-trigger:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:720px){.week-picker-trigger{min-height:36px;padding:5px 9px}}
+/* Keep settings panels aligned across loading and populated states. */
+.settings-dashboard{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:16px}
+.settings-dashboard>.settings-card{grid-column:1/-1;padding:20px}
+.settings-dashboard>.settings-profile,.settings-dashboard>.settings-space{grid-column:auto}
+.settings-dashboard .panel-heading{align-items:center;gap:12px;flex-direction:row;flex-wrap:wrap}
+.settings-dashboard .panel-heading>div{min-width:0;flex:1 1 200px}
+.settings-dashboard .panel-heading>.button{flex:none}
+.settings-dashboard .settings-body{min-width:0;flex:1}
+.settings-dashboard :is(.account-row,.member-list>div,.invitation-list>div)>div{min-width:0;overflow-wrap:anywhere}
+@media(max-width:720px){
+  .settings-dashboard{grid-template-columns:minmax(0,1fr)}
+  .settings-dashboard>.settings-card{padding:16px;grid-column:1/-1}
+  .settings-dashboard .panel-heading>div{flex-basis:160px}
+}

@@ -1,19 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ReportCategory, Tag } from '@zhoubao/shared';
 import {
-  Archive,
-  ArchiveRestore,
-  ArrowDown,
-  ArrowUp,
   CheckCircle2,
   Database,
   Download,
   Link2,
-  Layers3,
   Palette,
-  Plus,
   ShieldCheck,
-  Tag as TagIcon,
   Trash2,
   Unlink,
   UserRound
@@ -22,7 +14,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { readUiTheme, saveUiTheme, UI_THEME_STORAGE_KEY, type UiTheme } from '../appearance';
 import { ErrorState, Loading, Modal } from '../components';
-import { ProjectSettings } from './ProjectsPage';
 
 const names: Record<string, string> = {
   dev: '本地开发账号',
@@ -52,7 +43,6 @@ type Account = {
   displayName: string | null;
   lastLoginAt: string | null;
 };
-const tagColors = ['#CF4F1C', '#2D6A4F', '#3A5BA0', '#8A4FA3', '#C7831B', '#59636E'];
 const themeOptions: Array<{ value: UiTheme; name: string; description: string }> = [
   { value: 'ios-glass', name: 'iOS 液态玻璃', description: '默认 · 通透柔和的白天外观' },
   { value: 'night', name: '夜间玻璃', description: '深色玻璃与清晰柔和的文字' },
@@ -73,11 +63,6 @@ export function SettingsPage() {
         '/api/auth/providers'
       )
   });
-  const tags = useQuery({ queryKey: ['tags'], queryFn: () => api<{ tags: Tag[] }>('/api/tags') });
-  const categories = useQuery({
-    queryKey: ['categories'],
-    queryFn: () => api<{ categories: ReportCategory[] }>('/api/categories')
-  });
   const status = (
     title: string,
     query: { isPending: boolean; error: Error | null; refetch: () => unknown }
@@ -97,13 +82,9 @@ export function SettingsPage() {
       settings={settings.data}
       accounts={accounts.data?.accounts ?? []}
       providers={providers.data?.providers ?? []}
-      tags={tags.data?.tags ?? []}
-      categories={categories.data?.categories ?? []}
       states={{
         settings: status('个人资料与空间', settings),
-        accounts: status('已绑定身份', accounts) ?? status('可用登录平台', providers),
-        tags: status('标签', tags),
-        categories: status('条目分类', categories)
+        accounts: status('已绑定身份', accounts) ?? status('可用登录平台', providers)
       }}
       qc={qc}
     />
@@ -114,17 +95,13 @@ function SettingsContent({
   settings,
   accounts,
   providers,
-  tags,
-  categories,
   states,
   qc
 }: {
   settings: SettingsData | undefined;
-  states: Record<'settings' | 'accounts' | 'tags' | 'categories', ReactNode>;
+  states: Record<'settings' | 'accounts', ReactNode>;
   accounts: Account[];
   providers: Array<{ provider: string; enabled: boolean }>;
-  tags: Tag[];
-  categories: ReportCategory[];
   qc: ReturnType<typeof useQueryClient>;
 }) {
   const [displayName, setDisplayName] = useState(settings?.profile.displayName ?? '');
@@ -141,11 +118,6 @@ function SettingsContent({
   const [inviteEmail, setInviteEmail] = useState('');
   const [removeMember, setRemoveMember] = useState<SettingsData['members'][number] | null>(null);
   const [unlinkAccount, setUnlinkAccount] = useState<Account | null>(null);
-  const [editTag, setEditTag] = useState<Tag | null>(null);
-  const [createTagOpen, setCreateTagOpen] = useState(false);
-  const [deleteTagTarget, setDeleteTagTarget] = useState<Tag | null>(null);
-  const [editCategory, setEditCategory] = useState<ReportCategory | null>(null);
-  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [theme, setTheme] = useState<UiTheme>(() => readUiTheme());
   useEffect(() => {
     const syncPreference = (event: StorageEvent) => {
@@ -214,85 +186,6 @@ function SettingsContent({
       qc.invalidateQueries({ queryKey: ['accounts'] });
     }
   });
-  const deleteTag = useMutation({
-    mutationFn: (id: string) => api(`/api/tags/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      setDeleteTagTarget(null);
-      qc.invalidateQueries({ queryKey: ['tags'] });
-      qc.invalidateQueries({ queryKey: ['report'] });
-    }
-  });
-  const saveTag = useMutation({
-    mutationFn: ({ id, name, color }: { id: string; name: string; color: string }) =>
-      api(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify({ name, color }) }),
-    onSuccess: () => {
-      setEditTag(null);
-      qc.invalidateQueries({ queryKey: ['tags'] });
-      qc.invalidateQueries({ queryKey: ['report'] });
-    }
-  });
-  const createTag = useMutation({
-    mutationFn: ({ name, color }: { name: string; color: string }) =>
-      api<Tag>('/api/tags', { method: 'POST', body: JSON.stringify({ name, color }) }),
-    onSuccess: () => {
-      setCreateTagOpen(false);
-      qc.invalidateQueries({ queryKey: ['tags'] });
-    }
-  });
-  const saveCategory = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      api<ReportCategory>(`/api/categories/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name })
-      }),
-    onSuccess: () => {
-      setEditCategory(null);
-      qc.invalidateQueries({ queryKey: ['categories'] });
-      qc.invalidateQueries({ queryKey: ['report'] });
-    }
-  });
-  const createCategory = useMutation({
-    mutationFn: (name: string) =>
-      api<ReportCategory>('/api/categories', {
-        method: 'POST',
-        body: JSON.stringify({ name })
-      }),
-    onSuccess: () => {
-      setCreateCategoryOpen(false);
-      qc.invalidateQueries({ queryKey: ['categories'] });
-    }
-  });
-  const archiveCategory = useMutation({
-    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
-      api(`/api/categories/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ archived })
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['categories'] });
-      qc.invalidateQueries({ queryKey: ['report'] });
-    }
-  });
-  const reorderCategories = useMutation({
-    mutationFn: (ids: string[]) =>
-      api('/api/categories/reorder', {
-        method: 'POST',
-        body: JSON.stringify({ ids, expectedIds: categories.map((category) => category.id) })
-      }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['categories'] })
-  });
-  const moveCategory = (category: ReportCategory, delta: number) => {
-    const archived = Boolean(category.archivedAt);
-    const group = categories.filter((item) => Boolean(item.archivedAt) === archived);
-    const index = group.findIndex((item) => item.id === category.id);
-    const target = index + delta;
-    if (index < 0 || target < 0 || target >= group.length) return;
-    const reordered = [...group];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
-    const active = archived ? categories.filter((item) => !item.archivedAt) : reordered;
-    const retired = archived ? reordered : categories.filter((item) => item.archivedAt);
-    reorderCategories.mutate([...active, ...retired].map((item) => item.id));
-  };
   const applyTheme = (value: UiTheme) => {
     setTheme(value);
     saveUiTheme(value);
@@ -441,7 +334,6 @@ function SettingsContent({
             </section>
           </>
         )}
-        <ProjectSettings />
         {settings && !states.settings && (
           <section id="settings-team" className="settings-card vertical settings-team">
             <div className="panel-heading">
@@ -631,131 +523,6 @@ function SettingsContent({
             </a>
           </div>
         </section>
-        {states.categories || (
-          <section id="settings-categories" className="settings-card vertical settings-categories">
-            <div className="panel-heading">
-              <div>
-                <h2>
-                  <Layers3 size={18} />
-                  条目分类
-                </h2>
-                <p>分类在整个工作区复用；停用后历史周报仍保留原名称。</p>
-              </div>
-              <button
-                className="button secondary compact-button"
-                onClick={() => {
-                  createCategory.reset();
-                  setCreateCategoryOpen(true);
-                }}
-              >
-                <Plus size={14} />
-                新建分类
-              </button>
-            </div>
-            <div className="category-management">
-              {categories.length ? (
-                categories.map((category) => {
-                  const peers = categories.filter(
-                    (item) => Boolean(item.archivedAt) === Boolean(category.archivedAt)
-                  );
-                  const index = peers.findIndex((item) => item.id === category.id);
-                  return (
-                    <div className={category.archivedAt ? 'archived' : ''} key={category.id}>
-                      <span className="category-order">{String(index + 1).padStart(2, '0')}</span>
-                      <div>
-                        <strong>{category.name}</strong>
-                        <small>{category.archivedAt ? '已停用 · 历史可见' : '使用中'}</small>
-                      </div>
-                      <div className="category-order-actions">
-                        <button
-                          className="icon-button"
-                          aria-label={`上移分类 ${category.name}`}
-                          disabled={index === 0 || reorderCategories.isPending}
-                          onClick={() => moveCategory(category, -1)}
-                        >
-                          <ArrowUp size={14} />
-                        </button>
-                        <button
-                          className="icon-button"
-                          aria-label={`下移分类 ${category.name}`}
-                          disabled={index === peers.length - 1 || reorderCategories.isPending}
-                          onClick={() => moveCategory(category, 1)}
-                        >
-                          <ArrowDown size={14} />
-                        </button>
-                      </div>
-                      <button className="button secondary" onClick={() => setEditCategory(category)}>
-                        编辑
-                      </button>
-                      <button
-                        className="button secondary category-archive-button"
-                        disabled={archiveCategory.isPending}
-                        onClick={() =>
-                          archiveCategory.mutate({ id: category.id, archived: !category.archivedAt })
-                        }
-                      >
-                        {category.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-                        {category.archivedAt ? '恢复' : '停用'}
-                      </button>
-                    </div>
-                  );
-                })
-              ) : (
-                <span className="muted">尚未创建分类，可在这里或周报条目中创建。</span>
-              )}
-            </div>
-            {(archiveCategory.error || reorderCategories.error) && (
-              <div className="page-action-error" role="alert">
-                分类操作失败：{(archiveCategory.error ?? reorderCategories.error)!.message}
-              </div>
-            )}
-          </section>
-        )}
-        {states.tags || (
-          <section id="settings-tags" className="settings-card vertical settings-tags">
-            <div className="panel-heading">
-              <div>
-                <h2>
-                  <TagIcon size={18} />
-                  标签管理
-                </h2>
-              </div>
-              <button
-                className="button secondary compact-button"
-                onClick={() => {
-                  createTag.reset();
-                  setCreateTagOpen(true);
-                }}
-              >
-                <Plus size={14} />
-                新建标签
-              </button>
-            </div>
-            <div className="tag-management">
-              {tags.length ? (
-                tags.map((tag) => (
-                  <div key={tag.id}>
-                    <i style={{ background: tag.color }} />
-                    <strong>{tag.name}</strong>
-                    <button className="button secondary" onClick={() => setEditTag(tag)}>
-                      编辑
-                    </button>
-                    <button
-                      className="icon-button danger"
-                      aria-label={`删除标签 ${tag.name}`}
-                      disabled={deleteTag.isPending}
-                      onClick={() => setDeleteTagTarget(tag)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <span className="muted">尚未创建标签，点击右上角“新建标签”开始使用。</span>
-              )}
-            </div>
-          </section>
-        )}
         <section id="settings-interface" className="settings-card settings-preference">
           <div className="settings-icon">
             <Palette />
@@ -823,83 +590,6 @@ function SettingsContent({
           </div>
         </Modal>
       )}
-      {editCategory && (
-        <CategoryEditor
-          category={editCategory}
-          onClose={() => setEditCategory(null)}
-          onSave={(name) => saveCategory.mutate({ id: editCategory.id, name })}
-          pending={saveCategory.isPending}
-          error={saveCategory.error?.message}
-        />
-      )}
-      {createCategoryOpen && (
-        <CategoryEditor
-          onClose={() => {
-            setCreateCategoryOpen(false);
-            createCategory.reset();
-          }}
-          onSave={(name) => createCategory.mutate(name)}
-          pending={createCategory.isPending}
-          error={createCategory.error?.message}
-        />
-      )}
-      {editTag && (
-        <TagEditor
-          tag={editTag}
-          onClose={() => setEditTag(null)}
-          onSave={(name, color) => saveTag.mutate({ id: editTag.id, name, color })}
-          pending={saveTag.isPending}
-          error={saveTag.error?.message}
-        />
-      )}{' '}
-      {createTagOpen && (
-        <TagEditor
-          onClose={() => {
-            setCreateTagOpen(false);
-            createTag.reset();
-          }}
-          onSave={(name, color) => createTag.mutate({ name, color })}
-          pending={createTag.isPending}
-          error={createTag.error?.message}
-        />
-      )}{' '}
-      {deleteTagTarget && (
-        <Modal
-          open
-          onOpenChange={(open) => {
-            if (!open && !deleteTag.isPending) setDeleteTagTarget(null);
-          }}
-          title="删除标签"
-          description="标签会从所有周报条目中移除，原始内容不会被删除。"
-        >
-          <div className="delete-confirmation">
-            <div className="delete-confirmation-icon">
-              <Trash2 size={20} />
-            </div>
-            <div>
-              <strong>{deleteTagTarget.name}</strong>
-              <p>确认永久删除这个标签。</p>
-            </div>
-          </div>
-          {deleteTag.error && (
-            <div className="delete-error" role="alert">
-              {deleteTag.error.message}
-            </div>
-          )}
-          <div className="dialog-actions">
-            <button className="button secondary" onClick={() => setDeleteTagTarget(null)}>
-              取消
-            </button>
-            <button
-              className="button destructive"
-              onClick={() => deleteTag.mutate(deleteTagTarget.id)}
-              disabled={deleteTag.isPending}
-            >
-              {deleteTag.isPending ? '删除中…' : '确认删除'}
-            </button>
-          </div>
-        </Modal>
-      )}
       {removeMember && (
         <Modal
           open
@@ -938,129 +628,5 @@ function SettingsContent({
         </Modal>
       )}
     </div>
-  );
-}
-
-function CategoryEditor({
-  category,
-  onClose,
-  onSave,
-  pending,
-  error
-}: {
-  category?: ReportCategory;
-  onClose: () => void;
-  onSave: (name: string) => void;
-  pending: boolean;
-  error?: string;
-}) {
-  const [name, setName] = useState(category?.name ?? '');
-  return (
-    <Modal
-      open
-      onOpenChange={(open) => !open && !pending && onClose()}
-      title={category ? '编辑条目分类' : '新建条目分类'}
-      description="名称在当前工作区内不可重复。"
-    >
-      <form
-        className="dialog-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSave(name.trim());
-        }}
-      >
-        <label>
-          分类名称
-          <input
-            autoFocus
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            maxLength={40}
-            placeholder="例如：开发、运维"
-            required
-          />
-        </label>
-        {error && (
-          <div className="form-error" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="dialog-actions">
-          <button type="button" className="button secondary" onClick={onClose} disabled={pending}>
-            取消
-          </button>
-          <button className="button" disabled={pending}>
-            {pending ? '保存中…' : category ? '保存分类' : '创建分类'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function TagEditor({
-  tag,
-  onClose,
-  onSave,
-  pending,
-  error
-}: {
-  tag?: Tag;
-  onClose: () => void;
-  onSave: (name: string, color: string) => void;
-  pending: boolean;
-  error?: string;
-}) {
-  const [name, setName] = useState(tag?.name ?? '');
-  const [color, setColor] = useState(tag?.color ?? tagColors[0]);
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()} title={tag ? '编辑标签' : '新建标签'}>
-      <form
-        className="dialog-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSave(name, color);
-        }}
-      >
-        <label>
-          标签名称
-          <input
-            autoFocus
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            maxLength={40}
-            required
-          />
-        </label>
-        <fieldset>
-          <legend>颜色</legend>
-          <div className="color-picker">
-            {tagColors.map((value) => (
-              <button
-                type="button"
-                key={value}
-                className={color === value ? 'selected' : ''}
-                style={{ background: value }}
-                onClick={() => setColor(value)}
-                aria-label={`选择颜色 ${value}`}
-              />
-            ))}
-          </div>
-        </fieldset>
-        {error && (
-          <div className="form-error" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="dialog-actions">
-          <button type="button" className="button secondary" onClick={onClose}>
-            取消
-          </button>
-          <button className="button" disabled={pending}>
-            {pending ? (tag ? '保存中…' : '创建中…') : tag ? '保存标签' : '创建标签'}
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
