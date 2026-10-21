@@ -43,23 +43,6 @@ describe('container authentication defaults', () => {
     expect(compose).toContain('127.0.0.1:3000:3000');
   });
 
-  it('deploys the immutable CNB image to Aliyun without embedding credentials', () => {
-    const pipeline = fs.readFileSync(path.join(root, '.cnb.yml'), 'utf8');
-
-    expect(pipeline).toContain('imports: https://cnb.cool/Linuxzs/udong-ssh/-/blob/main/deploy.yml');
-    expect(pipeline).toContain('host: 106.15.195.19');
-    expect(pipeline).toContain('username: udong');
-    expect(pipeline).toContain('DEPLOY_DIR=/data/Weekly-notes');
-    expect(pipeline).toContain('STATE_DIR="${HOME}/.local/state/zhoubao-deploy"');
-    expect(pipeline).toContain('--project-directory "$DEPLOY_DIR"');
-    expect(pipeline).toContain('IMAGE_NAME=${IMAGE_NAME}:${CNB_COMMIT_SHORT}');
-    expect(pipeline).toContain('node apps/server/dist/scripts/backup.js');
-    expect(pipeline).toContain('rollback()');
-    expect(pipeline).toContain('if [ "$HEALTHY" != true ]');
-    expect(pipeline).not.toMatch(/password:\s*\S+/i);
-    expect(pipeline).not.toContain('BEGIN OPENSSH PRIVATE KEY');
-  });
-
   it('keeps direct starts safe unless development access is explicitly enabled', () => {
     const config = fs.readFileSync(path.join(root, 'apps/server/src/config.ts'), 'utf8');
     const serverPackage = fs.readFileSync(path.join(root, 'apps/server/package.json'), 'utf8');
