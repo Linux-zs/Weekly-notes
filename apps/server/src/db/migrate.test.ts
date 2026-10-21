@@ -30,7 +30,7 @@ describe('database migrations', () => {
       type: 'other'
     });
     expect(sqlite.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({
-      version: 8
+      version: 9
     });
   });
 

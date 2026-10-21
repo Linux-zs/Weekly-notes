@@ -22,6 +22,9 @@ COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --prod --filter @zhoubao/server... --frozen-lockfile --registry=${NPM_REGISTRY}
 
 FROM node:24-bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends s-nail ca-certificates \
+    && ln -s /usr/bin/s-nail /usr/local/bin/mailx \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./

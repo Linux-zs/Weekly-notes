@@ -69,7 +69,25 @@ ALTER TABLE report_items ADD COLUMN category_id TEXT REFERENCES report_categorie
 CREATE INDEX IF NOT EXISTS idx_report_categories_workspace ON report_categories(workspace_id,archived_at,position);
 CREATE INDEX IF NOT EXISTS idx_items_category ON report_items(category_id);`,
   `ALTER TABLE report_items ADD COLUMN imported_from_item_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_report_item_import_source ON report_items(report_id,imported_from_item_id) WHERE imported_from_item_id IS NOT NULL;`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_item_import_source ON report_items(report_id,imported_from_item_id) WHERE imported_from_item_id IS NOT NULL;`,
+  `CREATE TABLE email_credentials (
+  account_id TEXT PRIMARY KEY REFERENCES auth_accounts(id) ON DELETE CASCADE,
+  password_hash TEXT NOT NULL
+);
+CREATE TABLE email_verifications (
+  email TEXT PRIMARY KEY,
+  token_id TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  sent_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  ready INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE email_auth_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  resets_at INTEGER NOT NULL
+);`
 ];
 
 export function runMigrations(sqlite: Database.Database) {

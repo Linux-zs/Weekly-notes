@@ -332,3 +332,8 @@ html[data-theme="night"] .week-picker-overlay{background:rgba(3,7,14,.5)}
   .settings-dashboard>.settings-card{padding:16px;grid-column:1/-1}
   .settings-dashboard .panel-heading>div{flex-basis:160px}
 }
+/* Email credentials share the existing dialog field and theme tokens. */
+.email-auth-form{margin-top:24px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.email-auth-form h2{font-size:20px}.email-auth-form small{font-weight:400;color:var(--muted)}
+.email-code-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.email-code-row input{min-width:0;width:100%}.email-code-row .button{white-space:nowrap}

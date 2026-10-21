@@ -11,6 +11,7 @@ import { ZodError } from 'zod';
 import { config, workspaceRoot } from './config.js';
 import { sqlite } from './db/index.js';
 import { registerAuth } from './auth.js';
+import { registerEmailAuth } from './email-auth.js';
 import { registerApi } from './routes/api.js';
 import { registerCatalog } from './routes/catalog.js';
 import { registerSettings } from './routes/settings.js';
@@ -62,6 +63,7 @@ export async function buildApp() {
     }
   });
   await registerAuth(app);
+  await registerEmailAuth(app);
   await registerCatalog(app);
   await registerApi(app);
   await registerSettings(app);

@@ -6,6 +6,7 @@ import { api, ApiError } from './api';
 import { watchUiTheme } from './appearance';
 import { createGlassRefractionMap } from './glass-refraction';
 import { Loading } from './components';
+import { EmailAuthForm } from './EmailAuthForm';
 import { browserTimezone, formatDate, isoWeekForDate, todayInTimezone, weekRangeForDate } from './lib';
 
 const ReportPage = lazy(() =>
@@ -526,9 +527,11 @@ export function LoginPage() {
   const providers = useQuery({
     queryKey: ['providers'],
     queryFn: () =>
-      api<{ devAuthEnabled: boolean; providers: Array<{ provider: string; enabled: boolean }> }>(
-        '/api/auth/providers'
-      )
+      api<{
+        devAuthEnabled: boolean;
+        emailAuthEnabled?: boolean;
+        providers: Array<{ provider: string; enabled: boolean }>;
+      }>('/api/auth/providers')
   });
   const labels: Record<string, string> = {
     google: 'Google',
@@ -577,6 +580,7 @@ export function LoginPage() {
             登录失败或登录流程已经过期，请重新尝试。
           </div>
         )}
+        {providers.data?.emailAuthEnabled && <EmailAuthForm />}
         <div className="provider-list">
           {providers.isLoading ? (
             <Loading />
@@ -599,7 +603,8 @@ export function LoginPage() {
               ))
           )}
         </div>
-        {providers.data?.providers.every((p) => !p.enabled) &&
+        {!providers.data?.emailAuthEnabled &&
+          providers.data?.providers.every((p) => !p.enabled) &&
           (providers.data.devAuthEnabled ? (
             <>
               <p className="muted center">尚未配置登录平台。本地开发可使用开发入口。</p>

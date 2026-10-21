@@ -16,6 +16,7 @@ import { readUiTheme, saveUiTheme, UI_THEME_STORAGE_KEY, type UiTheme } from '..
 import { ErrorState, Loading, Modal } from '../components';
 
 const names: Record<string, string> = {
+  email: '邮箱密码',
   dev: '本地开发账号',
   google: 'Google',
   microsoft: 'Microsoft',

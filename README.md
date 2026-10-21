@@ -125,3 +125,35 @@ pnpm build
 - `GET /health/ready`：数据库可以访问
 
 核心接口的集成测试使用独立临时 SQLite 数据库，不读写开发或生产数据。
+
+## 邮箱注册与密码登录（mailx）
+
+邮箱注册需要验证码，验证通过后自动登录；之后使用邮箱和密码登录。密码至少 12 个字符，使用带随机盐的 scrypt 存储；验证码仅保存 HMAC，10 分钟有效、60 秒重发间隔、最多 5 次校验。发送按邮箱每小时 5 次、IP 每小时 10 次限流，密码登录按来源 IP 每 15 分钟 30 次限流，同一 IP 与邮箱组合最多允许 10 次失败，并对失败请求施加渐进延迟；成功后清除此组合的失败计数，其他 IP 的失败不会锁定该邮箱。限流与验证码保存在 SQLite，重启不会清空。第三方同邮箱账号不会自动合并，验证后的邮箱账号可以接受有效空间邀请。本次不包含忘记密码或邮箱账号绑定入口。
+
+在 `.env` 中配置：
+
+```dotenv
+EMAIL_AUTH_ENABLED=true
+EMAIL_CODE_SECRET=<独立随机密钥，至少32个字符>
+MAILX_PATH=mailx
+```
+
+可用 `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` 生成密钥。不要提交密钥或 SMTP 密码。更换验证码密钥会使尚未使用的验证码失效，不影响已有密码。
+
+支持带 `-S sendwait` 的 s-nail/mailx；生产 Dockerfile 已安装 s-nail 并提供 `mailx` 别名。SMTP 配置由运行服务的用户的 mailrc 管理，应用不接收 SMTP 凭证。示例配置（s-nail 14.9，按邮件服务商修改）：
+
+```text
+set v15-compat
+set mta=smtp://smtp.example.com:587
+set smtp-use-starttls
+set smtp-auth=login
+set smtp-auth-user=mailer@example.com
+set smtp-auth-password="REPLACE_WITH_SMTP_APP_PASSWORD"
+set from="mailer@example.com"
+set ssl-verify=strict
+set sendwait
+```
+
+将配置保存在部署机受限权限文件（例如 `chmod 600 runtime/mailrc`），在 Compose 的 app volumes 中增加 `./runtime/mailrc:/root/.mailrc:ro`。若容器改为非 root 用户，挂载到该用户的 HOME 下。主机原生运行则配置服务用户的 `~/.mailrc`。配置方法参考 [s-nail 官方手册](https://www.sdaoden.eu/code-nail.html)。Windows 开发机未安装 mailx 时保持关闭；测试使用隔离数据库和模拟邮件，不发送真实验证码。
+
+启用前在同一容器或服务用户下用测试邮箱验证 SMTP 投递；mailx 成功退出仅表示 SMTP/MTA 接受，并不能保证邮件最终到达收件箱。冷却期拒绝不扣发送额度；发送额度与验证码状态在同一事务内预留。进程失败或 15 秒超时返回发送失败且使本次验证码失效，并退还原限流窗口的本次额度，不扣减新窗口计数。应用不会记录密码或验证码，也不会在 API 响应中回传验证码。数据库迁移在服务启动时自动执行，部署前按现有流程备份数据库。

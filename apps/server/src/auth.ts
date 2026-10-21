@@ -83,7 +83,7 @@ function enabled(provider: AuthProvider) {
   return false;
 }
 
-function createSession(reply: FastifyReply, userId: string, workspaceId?: string) {
+export function createSession(reply: FastifyReply, userId: string, workspaceId?: string) {
   const raw = randomToken();
   const timestamp = now();
   const expires = new Date(Date.now() + config.SESSION_TTL_DAYS * 86_400_000);
@@ -133,7 +133,7 @@ export function ensureWorkspaceForUser(userId: string) {
   return membership.workspaceId;
 }
 
-function createPersonalUser(identity: Identity, provider: AuthProvider | 'dev') {
+function createPersonalUser(identity: Identity, provider: AuthProvider | 'dev' | 'email') {
   const userId = id();
   const workspaceId = id();
   const timestamp = now();
@@ -187,7 +187,7 @@ function pendingInvitation(email: string | null) {
 
 function createInvitedUser(
   identity: Identity,
-  provider: AuthProvider,
+  provider: AuthProvider | 'email',
   invitation: { id: string; workspace_id: string; role: 'owner' | 'member' }
 ) {
   const userId = id();
@@ -320,7 +320,7 @@ async function resolveIdentity(
 
 export function provisionLoginIdentity(
   identity: Identity,
-  provider: AuthProvider,
+  provider: AuthProvider | 'email',
   linkUserId: string | null = null
 ) {
   const existing = sqlite
@@ -434,6 +434,7 @@ export async function registerAuth(app: FastifyInstance) {
 
   app.get('/api/auth/providers', async () => ({
     devAuthEnabled: config.devAuthBypass && !config.isProduction,
+    emailAuthEnabled: config.EMAIL_AUTH_ENABLED === 'true',
     providers: authProviders.map((provider) => ({
       provider,
       enabled: enabled(provider)
@@ -444,7 +445,7 @@ export async function registerAuth(app: FastifyInstance) {
     return {
       accounts: sqlite
         .prepare(
-          `SELECT id,provider,email,display_name AS displayName,last_login_at AS lastLoginAt FROM auth_accounts WHERE user_id=? AND provider IN ('google','microsoft','github','dev') ORDER BY created_at`
+          `SELECT id,provider,email,display_name AS displayName,last_login_at AS lastLoginAt FROM auth_accounts WHERE user_id=? AND provider IN ('google','microsoft','github','dev','email') ORDER BY created_at`
         )
         .all(request.currentUser.id)
     };
@@ -502,7 +503,7 @@ export async function registerAuth(app: FastifyInstance) {
     if (!account) return reply.code(404).send({ error: 'NOT_FOUND' });
     const count = sqlite
       .prepare(
-        `SELECT COUNT(*) AS count FROM auth_accounts WHERE user_id=? AND provider IN ('google','microsoft','github','dev')`
+        `SELECT COUNT(*) AS count FROM auth_accounts WHERE user_id=? AND provider IN ('google','microsoft','github','dev','email')`
       )
       .get(request.currentUser.id) as { count: number };
     if (count.count <= 1)

@@ -14,6 +14,9 @@ const envSchema = z.object({
   SESSION_COOKIE_NAME: z.string().default('zhoubao_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   DEV_AUTH_BYPASS: z.enum(['true', 'false']).default('false'),
+  EMAIL_AUTH_ENABLED: z.enum(['true', 'false']).default('false'),
+  EMAIL_CODE_SECRET: z.string().default(''),
+  MAILX_PATH: z.string().min(1).default('mailx'),
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),
   MICROSOFT_CLIENT_ID: z.string().default(''),
@@ -23,6 +26,9 @@ const envSchema = z.object({
 });
 
 const parsed = envSchema.parse(process.env);
+if (parsed.EMAIL_AUTH_ENABLED === 'true' && parsed.EMAIL_CODE_SECRET.length < 32) {
+  throw new Error('EMAIL_CODE_SECRET must contain at least 32 characters when email auth is enabled');
+}
 export const workspaceRoot = path.resolve(import.meta.dirname, '../../..');
 if (parsed.NODE_ENV === 'production' && parsed.DEV_AUTH_BYPASS === 'true') {
   throw new Error('DEV_AUTH_BYPASS must be false in production');
