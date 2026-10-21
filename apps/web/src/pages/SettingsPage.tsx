@@ -23,7 +23,6 @@ import { api } from '../api';
 import { readUiTheme, saveUiTheme, UI_THEME_STORAGE_KEY, type UiTheme } from '../appearance';
 import { ErrorState, Loading, Modal } from '../components';
 import { ProjectSettings } from './ProjectsPage';
-import { DepartedReports } from './DepartedReports';
 
 const names: Record<string, string> = {
   dev: '本地开发账号',
@@ -443,7 +442,6 @@ function SettingsContent({
           </>
         )}
         <ProjectSettings />
-        {settings?.role === 'owner' && <DepartedReports />}
         {settings && !states.settings && (
           <section id="settings-team" className="settings-card vertical settings-team">
             <div className="panel-heading">
